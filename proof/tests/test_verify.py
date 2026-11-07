@@ -32,7 +32,19 @@ class TestValid(unittest.TestCase):
         self.assertTrue(r["valid"], r)
         self.assertEqual(r["rows_checked"], 5)
         self.assertIsNone(r["broken_at_seq"])
-        self.assertEqual(set(r), {"valid", "rows_checked", "broken_at_seq", "reason", "bundle_head"})
+        self.assertEqual(set(r), {"valid", "rows_checked", "broken_at_seq", "reason", "bundle_head",
+                                  "signer_key_sha256"})
+
+    def test_signer_fingerprint_is_sha256_of_raw_public_key(self):
+        # PR #4 review #3: the signature only proves "whoever holds this key signed it". The fingerprint lets a judge
+        # compare the signer with the key we publish (README, results screen).
+        import hashlib
+        from cryptography.hazmat.primitives import serialization
+        raw = TEST_KEY.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+        self.assertEqual(verify_bytes(sample_bundle())["signer_key_sha256"], hashlib.sha256(raw).hexdigest())
+
+    def test_fingerprint_is_null_when_unreadable(self):
+        self.assertIsNone(verify_bytes(b"{not json")["signer_key_sha256"])
 
     def test_no_reveals_is_valid(self):
         self.assertTrue(verify_bytes(sample_bundle(reveal=()))["valid"])
@@ -69,7 +81,18 @@ class TestReasons(unittest.TestCase):
 
     def test_seq_gap(self):
         del self.obj["rows"][1]
-        self.assertEqual(self.reason(resign(self.obj))[0], "seq_gap")
+        self.assertEqual(self.reason(resign(self.obj)), ("seq_gap", 2))
+
+    def test_broken_row_is_reported_by_position_not_by_its_own_seq(self):
+        # PR #4 review #1: the tampered value may BE the seq. Edit row 3's seq to 7: the UI must flag row 3 (the
+        # third row in the file), not "row 7", which does not exist.
+        self.obj["rows"][2]["seq"] = 7
+        self.assertEqual(self.reason(resign(self.obj)), ("seq_gap", 3))
+
+    def test_bad_hex_in_a_row_reports_its_position(self):
+        self.obj["rows"][2]["seq"] = 9                         # a wrong seq AND a bad hash in the same row
+        self.obj["rows"][2]["hash"] = "Z" * 64
+        self.assertEqual(self.reason(resign(self.obj)), ("bad_hex", 3))
 
     def test_session_mismatch(self):
         row = self.obj["rows"][0]
@@ -151,7 +174,8 @@ class TestStandalone(unittest.TestCase):
                 f.write(sample_bundle())
             # -I: isolated mode, so the script cannot import anything from the repo even by accident.
             out = subprocess.run([sys.executable, "-I", VERIFY, good], capture_output=True, text=True)
-            self.assertEqual((out.returncode, out.stdout.strip()), (0, "VALID"))
+            fp = verify_bytes(sample_bundle())["signer_key_sha256"][:16]
+            self.assertEqual((out.returncode, out.stdout.strip()), (0, "VALID (signer key %s)" % fp))
             obj = json.loads(sample_bundle())
             obj["rows"][2]["time"] = "2026-11-07T23:41:26.511Z"
             bad = os.path.join(d, "bad.json")

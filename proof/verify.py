@@ -2,9 +2,11 @@
 """
 proof/verify.py: the STANDALONE bundle verifier.
 
-    python3 proof/verify.py BUNDLE.json            ->  prints VALID   or   INVALID: row 3 hash_mismatch
+    python3 proof/verify.py BUNDLE.json            ->  VALID (signer key 3f9a1c0b7d2e4a51)
+                                                       or  INVALID: row 3 hash_mismatch
     python3 proof/verify.py BUNDLE.json --json     ->  {"valid":false,"rows_checked":3,"broken_at_seq":3,
-                                                        "reason":"hash_mismatch","bundle_head":"..."}
+                                                        "reason":"hash_mismatch","bundle_head":"...",
+                                                        "signer_key_sha256":"<64 hex>"}
     exit code 0 if valid, 1 if not.
 
 WHY "STANDALONE"
@@ -47,8 +49,21 @@ WHAT IS CHECKED, IN ORDER (the first failure is reported)
 Because every byte is covered by (1) canonical form, (3) row hashes, (4) commitments, or (6) the signature, ANY
 single-byte edit gives INVALID. The test suite edits every byte of a sample bundle to prove it.
 
-NOTE vs FORMATS.md: the signed message here also includes `exported` (FORMATS lists code_hashes, head, session_id,
-v). Without it, changing a digit of the export time would still verify. Agreed change: see the group-chat note.
+The signed message matches FORMATS section 8: {code_hashes, exported, head, session_id, v}. (`exported` is signed
+so that even the export time cannot change without breaking the signature.)
+
+WHICH ROW IS "BROKEN"
+---------------------
+broken_at_seq is the row's POSITION in the file (1 = first row), not the row's own `seq` field: the seq may be the
+very value that was tampered with ("seq":3 edited to "seq":7 must flag the third row, not a row 7 that does not
+exist). For an honest chain the two are equal. The UI marks every row from broken_at_seq down (FORMATS section 10).
+
+WHO SIGNED: THE KEY FINGERPRINT
+-------------------------------
+The signature is checked against the public_key INSIDE the bundle. So VALID means "consistent, and signed by the
+holder of this key", not "signed by us": anyone can rebuild an edited chain and sign it with their own key. To tell
+the two apart, the verifier reports signer_key_sha256 = SHA-256 of the raw 32-byte public key (text output shows the
+first 16 hex characters). We publish our fingerprint (README, results screen); a judge compares the two.
 """
 
 import hashlib
@@ -173,41 +188,42 @@ def _step2_hex(b):
         raise _Invalid("bad_hex")
     if not all(isinstance(k, str) and _is_hex(v, 64) for k, v in b["code_hashes"].items()):
         raise _Invalid("bad_hex")
+    # Rows are reported by POSITION i (see "WHICH ROW IS BROKEN" above), never by r["seq"], which may be tampered.
     for i, r in enumerate(b["rows"], 1):
         fields = ["prev_hash", "hash", "commitment" if r["row_type"] == "attempt" else "response_commitment"]
         if not all(_is_hex(r[f], 64) for f in fields):
-            raise _Invalid("bad_hex", r["seq"], i - 1)
+            raise _Invalid("bad_hex", i, i - 1)
         if "reveal" in r and not _is_hex(r["reveal"]["nonce"], 64):
-            raise _Invalid("bad_hex", r["seq"], i - 1)
+            raise _Invalid("bad_hex", i, i - 1)
 
 
 def _step3_chain(b):
     prev = ZERO_HASH
     for i, r in enumerate(b["rows"], 1):
         if r["seq"] != i:
-            raise _Invalid("seq_gap", r["seq"], i)
+            raise _Invalid("seq_gap", i, i)
         if r["session_id"] != b["session_id"]:
-            raise _Invalid("session_mismatch", r["seq"], i)
+            raise _Invalid("session_mismatch", i, i)
         if r["prev_hash"] != prev:
-            raise _Invalid("prev_mismatch", r["seq"], i)
+            raise _Invalid("prev_mismatch", i, i)
         if row_hash(r) != r["hash"]:
-            raise _Invalid("hash_mismatch", r["seq"], i)
+            raise _Invalid("hash_mismatch", i, i)
         prev = r["hash"]
 
 
 def _step4_reveals(b):
     n = len(b["rows"])
-    for r in b["rows"]:
+    for i, r in enumerate(b["rows"], 1):
         if "reveal" not in r:
             continue
         if r["row_type"] != "attempt":
-            raise _Invalid("reveal_on_result", r["seq"], n)
+            raise _Invalid("reveal_on_result", i, n)
         if r["decision"] != "allowed":
-            raise _Invalid("reveal_on_blocked", r["seq"], n)
+            raise _Invalid("reveal_on_blocked", i, n)
         payload = r["reveal"]["payload"].encode("utf-8")
         digest = hashlib.sha256(bytes.fromhex(r["reveal"]["nonce"]) + payload).hexdigest()
         if digest != r["commitment"] or len(payload) != r["bytes"]:
-            raise _Invalid("reveal_mismatch", r["seq"], n)
+            raise _Invalid("reveal_mismatch", i, n)
 
 
 def _step5_head(b):
@@ -228,12 +244,23 @@ def _step6_signature(b):
 # Public API
 # ---------------------------------------------------------------------------------------------------------------
 
+def key_fingerprint(public_key_hex):
+    """SHA-256 (hex) of the raw 32-byte Ed25519 public key, or None if the field is not a valid key encoding.
+    Compare it with the fingerprint we publish to know WHO signed (see the module docstring)."""
+    if not _is_hex(public_key_hex, 64):
+        return None
+    return hashlib.sha256(bytes.fromhex(public_key_hex)).hexdigest()
+
+
 def verify_bytes(data):
-    """Verify bundle bytes. Returns {"valid", "rows_checked", "broken_at_seq", "reason", "bundle_head"}."""
-    head = None
+    """Verify bundle bytes. Returns
+    {"valid", "rows_checked", "broken_at_seq", "reason", "bundle_head", "signer_key_sha256"}.
+    signer_key_sha256 is reported whenever the bundle's public_key is readable, even if the bundle is INVALID."""
+    head = signer = None
     try:
         b = _step1_parse(data)
         head = b.get("head") if isinstance(b.get("head"), str) else None
+        signer = key_fingerprint(b.get("public_key"))
         _structure(b)
         _step2_hex(b)
         _step3_chain(b)
@@ -242,9 +269,9 @@ def verify_bytes(data):
         _step6_signature(b)
     except _Invalid as e:
         return {"valid": False, "rows_checked": e.rows_checked, "broken_at_seq": e.seq, "reason": e.reason,
-                "bundle_head": head}
+                "bundle_head": head, "signer_key_sha256": signer}
     return {"valid": True, "rows_checked": len(b["rows"]), "broken_at_seq": None, "reason": None,
-            "bundle_head": head}
+            "bundle_head": head, "signer_key_sha256": signer}
 
 
 def verify_file(path):
@@ -253,7 +280,7 @@ def verify_file(path):
             data = f.read()
     except OSError:
         return {"valid": False, "rows_checked": 0, "broken_at_seq": None, "reason": "parse_error",
-                "bundle_head": None}
+                "bundle_head": None, "signer_key_sha256": None}
     return verify_bytes(data)
 
 
@@ -266,7 +293,7 @@ def main(argv):
     if "--json" in argv:
         print(json.dumps(r, sort_keys=True))
     elif r["valid"]:
-        print("VALID")
+        print("VALID (signer key %s)" % r["signer_key_sha256"][:16])
     elif r["broken_at_seq"] is not None:
         print("INVALID: row %d %s" % (r["broken_at_seq"], r["reason"]))
     else:

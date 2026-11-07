@@ -17,8 +17,10 @@ export_session(session_id, db_path=..., out_dir="bundles", reveal="allowed", key
 THE LEDGER WE READ (Aayush's gate/, as he described it)
 -------------------------------------------------------
 ledger/doublethink.db, one table keyed by (session_id, seq) with columns:
-    row_json      the canonical FORMATS section 7 row WITHOUT its hash   -> parsed and becomes the bundle row
-    hash          that row's hash                                         -> added back as "hash"
+    row_json      the canonical FORMATS section 7 row, INCLUDING its "hash" (gate/ledger.py sets row["hash"] before
+                  inserting canonical_json(row))                          -> parsed and becomes the bundle row
+    hash          that row's hash, also as its own column                 -> written over row["hash"]; the two
+                  are equal in an honest ledger, and if they ever differ the verifier reports hash_mismatch
     nonce_priv    private, never hashed: the row's nonce (BLOB, or hex TEXT; both accepted)
     payload_priv  private, never hashed: attempt row = exact payload sent; result row = response body
 UPDATE and DELETE are refused by triggers. We open the file READ ONLY and never write it.
@@ -229,9 +231,10 @@ def rows_from_sqlite(db_path, session_id):
     Read one session from the Gate's ledger.
 
     Returns (rows, reveals):
-      rows     the FORMATS section 7 rows in seq order: json.loads(row_json) with "hash" added back. Hashes are NOT
-               recomputed here: the bundle carries exactly what the ledger stored, and the verifier re-checks it, so
-               a ledger row whose row_json and hash disagree shows up as INVALID instead of being silently fixed.
+      rows     the FORMATS section 7 rows in seq order: json.loads(row_json) (which already carries "hash"), with
+               "hash" set from the hash column. Hashes are NOT recomputed here: the bundle carries exactly what the
+               ledger stored, and the verifier re-checks it, so a ledger row whose content and hash disagree shows up
+               as INVALID instead of being silently fixed.
       reveals  {seq: (payload_bytes, nonce_bytes)} for ATTEMPT rows whose private columns are filled. Result rows
                are skipped: their private columns hold the response body, which is never revealed.
     """
@@ -257,10 +260,16 @@ def rows_from_sqlite(db_path, session_id):
 
 def export_bundle(session_id, db_path=DEFAULT_DB, reveal="allowed", key_path=DEFAULT_KEY, repo_root=_ROOT):
     """THE FUNCTION THE GATE CALLS for GET /v1/bundle. Returns the signed, canonical bundle bytes; writes no file
-    (except the signing key, created once on first use)."""
+    (except the signing key, created once on first use).
+
+    Raises LookupError if the ledger has no rows for session_id (typo'd or never-run session): the caller answers
+    404. Without this, an empty bundle (head = 64 zeros) would be signed and verify VALID, i.e. a green VALID on
+    stage that proves nothing (PR #4 review #2)."""
     if reveal not in ("allowed", "none"):
         raise ValueError("reveal must be 'allowed' or 'none'")
     rows, private = rows_from_sqlite(db_path, session_id)
+    if not rows:
+        raise LookupError("no ledger rows for session %r" % session_id)
     reveals = private if reveal == "allowed" else {}      # build_bundle also refuses to reveal blocked attempts
     return build_bundle(session_id, rows, reveals, load_or_create_key(key_path), code_hashes(repo_root), _now())
 

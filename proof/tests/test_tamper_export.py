@@ -158,13 +158,19 @@ class TestExport(unittest.TestCase):
                                  reveal="none")
             self.assertFalse(any("reveal" in r for r in json.loads(data)["rows"]))
 
-    def test_unknown_session_exports_an_empty_but_valid_bundle(self):
+    def test_unknown_session_is_refused_not_exported_as_valid(self):
+        # PR #4 review #2: a typo'd session id used to export an EMPTY bundle that verified VALID, i.e. a green
+        # VALID on stage for nothing. Now it raises LookupError (the app answers 404) and writes no file.
         with tempfile.TemporaryDirectory() as d:
             db = os.path.join(d, "doublethink.db")
             make_gate_db(db)
-            data = export_bundle("s_nosuch0001", db_path=db, key_path=os.path.join(d, "k.pem"), repo_root=ROOT)
-            r = verify_bytes(data)
-            self.assertEqual((r["valid"], r["rows_checked"]), (True, 0))
+            with self.assertRaises(LookupError):
+                export_bundle("s_nosuch0001", db_path=db, key_path=os.path.join(d, "k.pem"), repo_root=ROOT)
+            out = os.path.join(d, "out")
+            with self.assertRaises(LookupError):
+                export_session("s_nosuch0001", db_path=db, out_dir=out, key_path=os.path.join(d, "k.pem"),
+                               repo_root=ROOT)
+            self.assertFalse(os.path.exists(os.path.join(out, "s_nosuch0001.json")))
 
     def test_key_created_once_and_private(self):
         with tempfile.TemporaryDirectory() as d:
