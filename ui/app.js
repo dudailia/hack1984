@@ -303,15 +303,15 @@
       : seg.text));
   }
 
+  // The memo as a paper dossier: typewriter header, ink stamp, marker redactions (DESIGN.md "Materials").
   function dossier(sid, redact) {
     const s = session(sid);
     const subject = s.title || '—';
-    return [
-      el('p', { class: 'dossier-head' }, '> FILE 1984 · SUBJECT: ', redact ? redacted(subject, sid) : subject,
-        s.sha ? ` · sha ${shortHash(s.sha)}` : ''),
-      el('div', { class: 'confidential', 'aria-label': 'confidential' }, 'CONFIDENTIAL'),
-      el('div', { class: 'memo' }, redact ? redacted(s.memo, sid) : s.memo),
-    ];
+    return el('article', { class: 'paper', 'aria-label': 'Confidential memo' },
+      el('p', { class: 'tw' }, 'FILE 1984', s.sha ? `  ·  SHA ${shortHash(s.sha)}` : ''),
+      el('p', { class: 'tw' }, 'SUBJECT: ', redact ? redacted(subject, sid) : subject),
+      el('div', { class: 'stamp-row' }, el('span', { class: 'confidential' }, 'CONFIDENTIAL')),
+      el('div', { class: 'memo' }, redact ? redacted(s.memo, sid) : s.memo));
   }
 
   function renderMemo() {
@@ -362,7 +362,6 @@
         el('span', { class: 'seq' }, pad2(row.seq)),
         el('span', { class: 'kind' }, row.kind),
         el('span', { class: 'dest', title: row.destination }, shortDest(row.destination)),
-        el('span', { class: 'hash', title: row.hash }, shortHash(row.hash)),
         mark));
       const d = display || {};
       if (d.query) {
@@ -375,6 +374,10 @@
       if (row.rule) li.append(el('div', { class: 'rule indent' }, `rule ${row.rule}`, detail ? el('span', { class: 'detail' }, ` · ${detail}`) : null));
       if (kind === 'blocked' || kind === 'leak') li.append(el('div', { class: 'indent' }, el('span', { class: 'stamp' }, kind === 'blocked' ? 'BLOCKED' : 'LEAKED')));
       if (entry.blockedInfo && entry.blockedInfo.planted) li.append(plantedTag());
+      // Receipt footer: the hash, the bytes and the time, under a tear line.
+      li.append(el('div', { class: 'slip-foot' },
+        el('span', { class: 'hash', title: row.hash }, `#${shortHash(row.hash)}`),
+        el('span', null, `${row.bytes != null ? `${row.bytes} B · ` : ''}${(row.time || '').slice(11, 19)}`)));
     } else {
       const bits = [row.status === 'sent' ? String(row.http_status ?? '') : row.status];
       if (row.credits_used != null) bits.push(`${row.credits_used} credit${row.credits_used === 1 ? '' : 's'}`);
@@ -476,13 +479,29 @@
     return splitTerms(text, terms).map((seg) => (seg.term ? el('mark', { class: 'planted' }, seg.text) : seg.text));
   }
 
+  function splitUrl(url) {
+    try {
+      const u = new URL(url);
+      return { host: u.host, path: `${u.pathname}${u.search}` };
+    } catch (_) {
+      return { host: url || '', path: '' };
+    }
+  }
+
+  // A web page as a mini browser window: tab, address bar, then the page (DESIGN.md "Materials").
   function docNode(doc, animate) {
     const hl = doc.highlights || [];
-    return el('article', { class: `doc${animate ? ' fade' : ''}` },
-      el('div', { class: 'doc-title' }, `${doc.result_id}  ${doc.title}`),
-      el('div', { class: 'doc-url' }, doc.url),
-      el('p', { class: 'doc-excerpt' }, excerptNodes(doc.excerpt || '', hl)),
-      hl.map((h) => el('p', { class: `planted-label${animate ? ' fade-late' : ''}` }, `▲ ${h.label}`)));
+    const { host, path } = splitUrl(doc.url);
+    return el('article', { class: `browser${animate ? ' fade' : ''}`, 'aria-label': `Web page ${doc.result_id}` },
+      el('div', { class: 'tabbar' },
+        el('span', { class: 'tab', title: doc.title }, `${doc.result_id} · ${doc.title}`)),
+      el('div', { class: 'addr' },
+        el('span', { class: 'nav', 'aria-hidden': 'true' }, '‹ › ↻'),
+        el('span', { class: 'field', title: doc.url }, el('b', null, host), path)),
+      el('div', { class: 'page' },
+        el('div', { class: 'doc-title' }, doc.title),
+        el('p', { class: 'doc-excerpt' }, excerptNodes(doc.excerpt || '', hl)),
+        hl.map((h) => el('p', { class: `planted-label${animate ? ' fade-late' : ''}` }, `▲ ${h.label}`))));
   }
 
   function jobNode(d, animate) {
@@ -564,7 +583,8 @@
       li.querySelector('.pslot').textContent = '✕';
       if (d.tampered && Number(li.dataset.seq) === d.tampered_seq) {
         li.classList.add('tampered');
-        li.append(el('div', { class: 'indent' }, el('span', { class: 'tag tampered-tag' }, '1 byte edited')));
+        li.insertBefore(el('div', { class: 'indent' }, el('span', { class: 'tag tampered-tag' }, '1 byte edited')),
+          li.querySelector('.slip-foot'));
       }
     };
 
@@ -806,7 +826,7 @@
         const r = li.querySelector('.rule');
         if (r) r.append(el('span', { class: 'detail' }, ` · ${env.data.detail}`));
       }
-      if (env.data.planted && !li.querySelector('.tag')) li.append(plantedTag());
+      if (env.data.planted && !li.querySelector('.tag')) li.insertBefore(plantedTag(), li.querySelector('.slip-foot'));
       if (o && o.instant) scrollLedger();
     },
 
@@ -819,7 +839,8 @@
       const node = jobNode(d, !(o && o.instant));
       target.append(node);
       const planted = node.querySelector('mark.planted');
-      scrollWithin(target, planted || node, planted ? 'center' : 'start');
+      // Show the poisoned page whole, from its tab and address bar down.
+      scrollWithin(target, planted ? planted.closest('.browser') : node, 'start');
     },
 
     reader_claims(env) {

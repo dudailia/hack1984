@@ -32,9 +32,19 @@ Contrast ratios were computed with the WCAG 2.x relative-luminance formula.
 
 | Token | Value | Use | Contrast |
 |---|---|---|---|
-| --bg | #0A0A0A | page | – |
-| --surface-1 | #141414 | rooms, ledger | – |
-| --surface-2 | #1E1E1E | rows on hover, memo block, buttons | – |
+| --bg | #0A0A0A | L0: the void and the gate floor | – |
+| --surface-1 | #161616 | L1: rooms (darkening to --surface-1-edge #0E0E0E toward the screen edge) | – |
+| --surface-2 | #1E1E1E | buttons and inputs | – |
+| --surface-3 | #2B2926 | L2: receipt slips and browser chrome | --text on it 12.1:1, --text-muted 5.8:1, --calm 7.4:1 |
+| --slip-edge | #5C5852 | 2px outline of slips and browser windows; tear lines | – |
+| --paper | #E9E4D7 | the dossier card | – |
+| --ink | #16130F | dossier text, CONFIDENTIAL stamp | 14.6:1 on --paper |
+| --ink-muted | #4A443A | dashed rule on the dossier | 7.6:1 on --paper |
+| --marker | #111111 | redaction marker strokes | --paper on it 14.9:1 (revealed text) |
+| --web-page | #F2F4F5 | browser page body, tab and address bar | – |
+| --web-ink | #14181B | page text, domain | 16.2:1 on --web-page |
+| --web-muted | #4D5559 | URL path, nav glyphs | 6.9:1 on --web-page |
+| --glow | rgba(237,234,226,.35) | the light from the wall and the door | – |
 | --text | #EDEAE2 | body text, numbers, the wall | 16.5:1 on --bg, 13.9:1 on --surface-2 |
 | --text-muted | #A8A49C | labels, secondary fields, hashes | 8.0:1 on --bg, 6.7:1 on --surface-2 |
 | --text-dim | #9C978F | tertiary info only (ledger hashes, title small print) | 6.8:1 on --bg, 5.8:1 on --surface-2 |
@@ -47,8 +57,33 @@ Contrast ratios were computed with the WCAG 2.x relative-luminance formula.
 | --calm-bg | #0A2226 | VALID panel fill | --text on it 13.8:1 |
 | --focus | #EDEAE2 | focus ring | 16.5:1 |
 
-The results file's example banner is not a leak, so it is styled off-white on black, never red. The same goes for the
-CONFIDENTIAL stamp on the memo and the VERIFYING RUN label: both are off-white.
+The results file's example banner is not a leak, so it is styled off-white on black, never red. The VERIFYING RUN
+label is off-white too, and the CONFIDENTIAL stamp is dark ink on paper.
+
+**Light surfaces (paper, web page) never carry red or cyan text.** On them, red is always a solid `--red` fill with
+`--on-red` text (5.9:1): the planted instruction and its label. Cyan does not appear on light surfaces.
+
+### Light and layers
+- **Levels:**
+  - L0 is the gate floor.
+  - L1 is the rooms.
+  - L2 is the slips and browser chrome.
+  - The documents (paper, web page) are the lightest layer.
+- **Depth comes from shapes, not faint gradients:**
+  - hard offset shadows (`4–6px 4–6px 0 #000`);
+  - 2px outlines;
+  - punched perforations;
+  - tear lines;
+  - the light materials.
+- **The wall is the light source.** The wall bars have a static `0 0 18px` glow. The exit bar has a 3px off-white
+  top edge with an upward glow, and `ONLY DOOR OUT` has a text glow. The rooms catch a little of that light on the
+  side facing the wall (an inset glow).
+- **Vignette:** it lives in the room and gate backgrounds (a radial gradient to a darker edge). It is not an overlay,
+  so it only darkens what is *behind* the text and contrast goes up, never down. An overlay vignette was tried and
+  rejected: darkening text and background together dropped muted and red text below 4.5:1 at the corners.
+- **Ink texture:** the BLOCKED, LEAKED and CONFIDENTIAL outline stamps carry a static speckle `mask-image` (an inline
+  SVG noise data URI, mostly opaque), like a rubber stamp. The solid INVALID block does not, because on a solid fill
+  the speckle reads as noise.
 
 ### Telescreen atmosphere and contrast
 - Two fixed overlays sit above the page with `pointer-events: none`. Both are static, with no flicker and no loop.
@@ -68,7 +103,32 @@ CONFIDENTIAL stamp on the memo and the VERIFYING RUN label: both are off-white.
   | --calm on --surface-2 | 7.3:1 |
 
   That is why --text-dim went from #8A867F to #9C978F. Red text is never placed on --surface-2.
+- New pairs under the same overlays (worst pixel):
+
+  | Pair | Contrast |
+  |---|---|
+  | ink on paper (with its 5% grain) | 11.3:1 |
+  | web-ink on web page | 13.6:1 |
+  | on-red on red | 5.1:1 |
+  | --text-muted on --surface-3 | 5.1:1 |
+  | --calm on --surface-3 | 6.4:1 |
+
+  --text-dim on --surface-3 would drop to 4.4:1, so slips use --text-muted for their footer and never --text-dim.
 - Under `prefers-reduced-motion: reduce` both overlays are hidden.
+
+### Projector check
+Every screenshot of a key moment is also run through a projector simulation, then checked for whether these still
+separate:
+- the rooms from the gate;
+- the slips from the gate floor;
+- the documents from their rooms;
+- the stamps from their slips.
+
+The simulation (in Pillow): `out = 46 + 0.66 × in` per channel plus 5% brightness. That lifts black to about 18% grey
+and compresses the contrast.
+
+At the depth pass, the rooms and the gate floor came out close in tone, but the 8px glowing wall separates them. The
+paper, the browser windows, the slip outlines and the stamps all held up.
 
 ## 2. Type
 
@@ -78,15 +138,25 @@ CONFIDENTIAL stamp on the memo and the VERIFYING RUN label: both are off-white.
   Sheara's OK.
 - Labels use upper case with `letter-spacing: 0.08em`. Values keep normal case.
 - `font-variant-numeric: tabular-nums` is always on, so numbers line up.
+- The dossier's typewriter header uses `"Courier New", Courier` (system fonts, no file) in bold at 18px. It is the only
+  other face, and it appears only on paper.
+- **Room headers:**
+  - a HACK1984-style index (`01 / 03`, `02 / 03`, `03 / 03`; in single agent layout `01 / 02`, `02 / 02`) in muted
+    16px;
+  - then the title at 24px bold upper case;
+  - then the subtitle at 18px muted;
+  - then a 2px dotted --text-muted ruler.
+
+  Dotted rulers also sit under the exit bar and above the claims.
 
 Scale, sized for 1280x720 on a projector. **Nothing is smaller than 16px.**
 
 | Token | px at 1280 | Use |
 |---|---|---|
 | --fs-0 | 16 | ledger rows, excerpts, typed facts, metadata, buttons |
-| --fs-1 | 18 | memo text, answer quotes, room subtitles |
-| --fs-2 | 20 | room titles (PLANNER ROOM), metrics values |
-| --fs-3 | 24 | wordmark, answer headline numbers |
+| --fs-1 | 18 | memo text, dossier typewriter header, answer quotes, room subtitles, page titles |
+| --fs-2 | 20 | the gate eye, TIME counter |
+| --fs-3 | 24 | room titles (PLANNER ROOM), wordmark, answer headline numbers |
 | --fs-4 | 32 | results screen bar labels and values |
 | --fs-5 | 48 | stamps: LEAKED, BLOCKED, VALID, INVALID |
 | --fs-6 | 64 | results screen title number |
@@ -170,15 +240,21 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
     `display.summary` for reader rows), and the decision mark: `✓` cyan for allowed, `✕ BLOCKED` red for blocked.
   - Short destinations: `api.tavily.com` → `tavily`, `api.anthropic.com` → `anthropic`, `127.0.0.1:8702` →
     `fake:8702`. The full host is in the `title` tooltip.
-  - Result rows (`row_type "result"`) are indented one line under their attempt (`attempt_seq`) in --text-muted, for
-    example `↳ 200 · 1 credit` from `http_status` and `credits_used`.
-  - Each row shows a short `hash` (first 4 and last 4 hex). The proof walk uses it.
+  - Result rows (`row_type "result"`) are the tear-off stub under their attempt (`attempt_seq`), in --text-muted,
+    for example `↳ 200 · 1 credit` from `http_status` and `credits_used`.
+  - Each row shows a short `hash` (first 4 and last 4 hex). The proof walk uses it. On attempts it is the receipt
+    footer, `#c2a8…3e01 · 139 B · 23:40:41` (`bytes`, and `time` as HH:MM:SS). On stubs it sits at the right of the
+    line.
+  - The material, receipt slips, is described in "Materials" below.
   - `rule` and `display.detail` show under the row when they are set.
   - After a `blocked` event whose `data.planted` is true, the row is tagged `planted test query`.
 - **Reader room:**
-  - It shows `docs_read.data`: the `public_query` at the top, then one card per `docs[]` with title, url and excerpt.
-  - Each `highlights[].text` gets a red left bar and a --red-bg fill, with `highlights[].label` shown underneath
-    ("planted instruction (demo annotation)").
+  - It shows `docs_read.data`: the `public_query` at the top, then one browser window per `docs[]` (see
+    "Materials").
+  - Each `highlights[].text` is a solid red marker with `--on-red` text. `highlights[].label` sits underneath as a
+    red chip ("▲ planted instruction (demo annotation)").
+  - When a poisoned page arrives, the room scrolls to the top of its window, so the tab and address bar stay in
+    view.
   - Below the cards come `reader_claims.data`: `kept` claims with their quotes, and `dropped` claims in muted text
     with `reason`.
 - **Answer bar:** a one-line summary of the `answer` event.
@@ -241,17 +317,23 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
   - How it goes away:
     - Space or a click starts playback and fades the title out (250ms, opacity);
     - in live mode it goes away on the first `run_started` or on any key.
-- **Dossier memo.** Both rooms with a memo show it as a file:
-  - a header line `> FILE 1984 · SUBJECT: <memo_loaded.title> · sha <first 4…last 4 of memo_loaded.sha256>`;
-  - an off-white double-ruled `CONFIDENTIAL` stamp, rotated -3deg;
-  - then the memo text.
+- **Materials.** Each kind of thing has its own physical material, so a judge can tell the secret, the web and the
+  record apart at a glance:
+
+  | Thing | Material | Built from |
+  |---|---|---|
+  | The memo (the secret) | **A paper dossier.** An off-white `--paper` card with `--ink` text, 5% static darken-only paper grain, and a hard 6px offset shadow. A typewriter header (`FILE 1984 · SHA c4be…5bb0`, then `SUBJECT: …`) sits over a dashed rule. Below it, an ink-stamped `CONFIDENTIAL`: dark ink, a double border, rotated -4deg, with ink speckle. Redactions are black marker strokes (`--marker` with a faint streak texture); hover or focus reveals the value in paper colour on the black bar. | `dossier()` → `article.paper` |
+  | The web | **A mini browser window.** A `--surface-3` chrome frame with a 2px `--slip-edge` outline and a 6px shadow. Inside: a square tab (`r_03 · title`), an address bar (`‹ › ↻` and a field with the **domain** bold and the path muted), then the light page with the title and the excerpt. | `docNode()` → `article.browser` |
+  | The record | **Printed receipt slips.** Each attempt is a `--surface-3` slip with a 2px outline, a 4px hard shadow and a punched perforation along its top edge. Its footer, under a dashed tear line, holds the hash, the bytes and the time. Its result row is the indented tear-off stub underneath. The red layer, stamps and proof marks work as before. | `rowNode()` → `li.row` |
+- **Dossier details.** Both rooms with a memo show the paper card. The subject is `memo_loaded.title` and the sha is
+  the short `memo_loaded.sha256`.
 
   Redaction in the Planner room:
   - It is case-insensitive, so the subject `PROJECT HALYARD` and the memo's first line are hidden like
     `Project Halyard`.
   - `memo_id` is never shown, because it repeats the codename.
   - The One agent room shows everything in the clear, because that agent holds the secrets.
-- **The eye.** A 5-line ASCII eye sits at the right of the gate header.
+- **The eye.** A 5-line ASCII eye, 20px bold (about 230×115px), sits at the right of the gate header.
   - It is **open** in single agent layout (one model sees everything) and **closed**, as a lid line with lashes, in
     Doublethink layout (nothing can leave).
   - At a leak, a red copy of the open eye fades in on top. Red here means the leak.
