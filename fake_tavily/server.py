@@ -7,6 +7,7 @@ them poisoned (notes/DEMO.md). The baseline, compromised and two_minds modes and
     python3 -m fake_tavily.server [--port N]
 """
 import argparse
+import datetime
 import json
 import math
 import os
@@ -59,6 +60,11 @@ def _port_from_env_file(path):
             if s.startswith(PORT_KEY + "="):
                 return s.split("=", 1)[1].split("#", 1)[0].strip().strip("'\"")
     return None
+
+
+def _iso_now():
+    """UTC ISO 8601 with milliseconds and Z (FORMATS §0), for log lines."""
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 class TavilyError(Exception):
@@ -131,7 +137,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         # The request line holds method and path only; headers (Authorization included) are never logged.
         if self.server.verbose:
-            sys.stderr.write("fake_tavily %s\n" % (fmt % args))
+            sys.stderr.write("fake_tavily %s %s\n" % (_iso_now(), fmt % args))
 
     def _send(self, status, obj):
         data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
