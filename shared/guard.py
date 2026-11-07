@@ -21,6 +21,7 @@ After install, in this process (behaviour of baseline/netguard.py, plus per-role
 - starting a program raises PermissionError, except these exact argv lists, started through subprocess with
   no shell, no cwd and no env, and only when the program actually run is the one fixed at install time:
       app       [sys.executable, ("-I"), <repo>/proof/verify.py, BUNDLE, ("--json")]   (POST /api/verify)
+                the script path must be absolute; this one may also run with cwd=<repo>, as app/run.py does
       baseline  ["git", "-C", <repo>, "rev-parse", "-q", "--verify", "refs/tags/checks-frozen"]
                 ["git", "-C", <repo>, "rev-parse", "--short", "HEAD"]                (baseline/redteam.py)
   os.exec*, os.system, os.spawn* and os.startfile are always refused (subprocess never needs them), so a
@@ -155,6 +156,8 @@ def _make_hook(role, connect_ports, bind_ports):
     exe = sys.executable
     exe_real = realpath(exe) if exe else None
     verify = VERIFY
+    repo_real = realpath(REPO)
+    fspath = os.fspath
 
     def deny(what):
         raise PermissionError("guard(%s): %s is not allowed outside the Gate (invariant 1)" % (role, what))
@@ -190,9 +193,22 @@ def _make_hook(role, connect_ports, bind_ports):
         if port not in (bind_ports if event == "socket.bind" else connect_ports):
             deny("%s to loopback port %r" % (event, port))
 
+    def cwd_ok(cwd):
+        """No cwd, or (app verify only) cwd == the repo root, as app/run.py passes it. The verify argv names the
+        script by absolute path, so the cwd cannot change which file runs; relative script paths are refused
+        because the low-level fork_exec event does not carry the cwd."""
+        if cwd is None:
+            return True
+        if role != "app":
+            return False
+        try:
+            return realpath(fsdecode(fspath(cwd))) == repo_real
+        except TypeError:
+            return False
+
     def check_popen(executable, args, cwd, env):
         want = program_for(args)
-        if want is None or cwd is not None or env is not None or executable != args[0]:
+        if want is None or not cwd_ok(cwd) or env is not None or executable != args[0]:
             deny("starting %r" % (args[0] if isinstance(args, (list, tuple)) and args else args))
 
     def check_posix_spawn(path, argv, env):

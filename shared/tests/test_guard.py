@@ -375,6 +375,34 @@ R["verify_ran"] = bool(out.stdout.strip()) and out.returncode in (0, 1)
             self.assertEqual(r[k], "denied", k)
         self.assertTrue(r["verify_ran"], "the real proof/verify.py ran and printed a verdict")
 
+    def test_app_run_py_verify_call_exactly(self):
+        """app/run.py (main): subprocess.run([sys.executable, <abs>/proof/verify.py, path, "--json"],
+        capture_output=True, timeout=30, cwd=<repo>)."""
+        r = run_child('''
+VERIFY = %r
+B = os.path.join(TMP, "b.json")
+open(B, "w").write("{}")
+def run_py_call():
+    out = subprocess.run([sys.executable, VERIFY, B, "--json"], capture_output=True, timeout=30, cwd=REPO)
+    R["out"] = out.stdout.decode().strip().splitlines()[-1] if out.stdout.strip() else ""
+attempt("run_py", run_py_call)
+attempt("cwd_repo_symlink_free", lambda: subprocess.run([sys.executable, VERIFY, B], capture_output=True,
+                                                          cwd=os.path.realpath(REPO)))
+attempt("relative_cwd_repo", lambda: subprocess.run([sys.executable, "proof/verify.py", B, "--json"],
+                                                      capture_output=True, cwd=REPO))
+attempt("relative_no_cwd", lambda: subprocess.run([sys.executable, "proof/verify.py", B, "--json"],
+                                                    capture_output=True))
+attempt("cwd_elsewhere", lambda: subprocess.run([sys.executable, VERIFY, B, "--json"], capture_output=True,
+                                                  cwd=TMP))
+attempt("cwd_repo_other_script", lambda: subprocess.run([sys.executable, os.path.join(REPO, "proof", "export.py"),
+                                                         B], capture_output=True, cwd=REPO))
+''' % VERIFY, role="app")
+        self.assertEqual(r["run_py"], "ok")
+        self.assertIn('"valid"', r["out"], "the real verifier ran and printed its --json result")
+        self.assertEqual(r["cwd_repo_symlink_free"], "ok")
+        for k in ("relative_cwd_repo", "relative_no_cwd", "cwd_elsewhere", "cwd_repo_other_script"):
+            self.assertEqual(r[k], "denied", k)
+
     def test_verify_denied_for_other_roles(self):
         for role in ("planner", "baseline", "fake_tavily"):
             with self.subTest(role=role):
