@@ -193,5 +193,50 @@ class PerCompanyDedupeTest(unittest.TestCase):
             self.assertEqual(len(ids), len(set(ids)))
 
 
+class ReviewGapsTest(unittest.TestCase):
+    """Review of PR #18: more aggregate wordings, and a leading article in a company name."""
+
+    def compose(self, kept):
+        ids = sorted({c["document_id"] for c in kept})
+        return reader.compose("q", PEERS, kept, src(*ids), today=TODAY)
+
+    def two_and(self, extra):
+        kept = [multiple("Corvane Pay", 3.0, "r_01"), multiple("Quillon Transact", 5.0, "r_02"), extra]
+        return self.compose(kept)["needs"][0]["headline"]
+
+    def test_more_aggregate_subjects(self):
+        for subject in ("payments peers", "peer group", "listed comps", "comparables", "S&P 500 payments benchmark",
+                        "payments composite", "fintech basket", "peer cohort", "coverage universe", "payments ETF",
+                        "payments market", "payments segment"):
+            with self.subTest(subject=subject):
+                h = self.two_and(multiple(subject, 9.0, "r_03", "The figure is 9.0x EV/revenue in 2025."))
+                self.assertEqual((h["method"], h["value"]), ("median of 2 companies", 4.0))
+
+    def test_peers_in_the_quote_only(self):
+        h = self.two_and(multiple("Sabrefield Pay", 9.0, "r_03", "Listed peers trade at 9.0x EV/revenue in 2025."))
+        self.assertEqual(h["method"], "median of 2 companies")
+
+    def test_market_in_a_quote_is_still_a_company(self):
+        h = self.two_and(multiple("Sabrefield Pay", 9.0, "r_03",
+                                  "Sabrefield Pay trades at 9.0x EV/revenue in 2025 at its market value."))
+        self.assertEqual(h["method"], "median of 3 companies")
+
+    def test_names_containing_the_new_words_are_companies(self):
+        for subject in ("Peerless Pay", "Marketa", "Basketo Payments"):
+            with self.subTest(subject=subject):
+                self.assertEqual(self.two_and(multiple(subject, 9.0, "r_03"))["method"], "median of 3 companies")
+
+    def test_withheld_subject_is_not_a_company(self):
+        out = self.compose([multiple("Corvane Pay", 3.0, "r_01"), multiple("Quillon Transact", 5.0, "r_02"),
+                            multiple("Fund 7", 9.0, "r_03", "The figure is 9.0x EV/revenue in 2025.")])
+        self.assertEqual(out["needs"][0]["headline"]["method"], "median of 2 companies")
+        self.assertIn("context: [subject withheld] 9.0x EV/revenue for 2025 [r_03]", out["text"])
+
+    def test_leading_article_is_the_same_company(self):
+        kept = [multiple("the Corvane Pay", 3.5, "r_01"), multiple("Corvane Pay", 4.5, "r_02"),
+                multiple("Quillon Transact", 5.0, "r_03")]
+        self.assertEqual(self.compose(kept)["needs"][0]["headline"]["method"], "median of 2 companies")
+
+
 if __name__ == "__main__":
     unittest.main()

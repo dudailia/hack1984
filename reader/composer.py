@@ -14,8 +14,13 @@ MULTIPLE_LABELS = {"ev_revenue_multiple": "EV/revenue", "ev_ebitda_multiple": "E
 _FORWARD_RE = re.compile(r"\b(?:projected|projects|projection|projections|forecast|forecasts|forecasted|"
                          r"expected|expects|expect|will|outlook)\b", re.IGNORECASE)
 # A multiple whose subject or quote is itself an aggregate is context, never a company in the peer median.
-_AGGREGATE_RE = re.compile(r"\b(?:median|medians|average|averages|mean|index|indices|sector|sectors|industry|"
-                           r"companies)\b", re.IGNORECASE)
+_AGGREGATE_WORDS = (r"median|medians|average|averages|mean|index|indices|sector|sectors|industry|companies|"
+                    r"peer|peers|comps|comparables|benchmark|benchmarks|composite|composites|basket|baskets|"
+                    r"cohort|cohorts|universe|etf|etfs")
+_AGGREGATE_RE = re.compile(r"\b(?:" + _AGGREGATE_WORDS + r")\b", re.IGNORECASE)
+# In a subject only: "payments market" is an aggregate, but a quote saying "market value" is not.
+_AGGREGATE_SUBJECT_RE = re.compile(r"\b(?:" + _AGGREGATE_WORDS + r"|market|markets|segment|segments)\b",
+                                   re.IGNORECASE)
 _NAME_WORD = re.compile(r"[a-z0-9&]+")
 _POSSESSIVE = re.compile(r"(?:'|\u2019)s?\b")
 _SUFFIXES = {"inc", "incorporated", "corp", "corporation", "co", "company", "plc", "ltd", "limited", "llc", "lp",
@@ -67,16 +72,22 @@ def _is_forecast(item, year):
 
 
 def _is_aggregate(item):
-    """A multiple whose subject or quote is an aggregate (median, average, index, sector, "... companies")."""
+    """A multiple whose subject or quote is an aggregate (median, average, index, sector, peers, benchmark,
+    "... companies"; in the subject also market or segment). A withheld subject cannot be shown to be a company,
+    so it is treated the same way."""
     return item["claim_type"] in MULTIPLE_LABELS and bool(
-        _AGGREGATE_RE.search(normalize(item["subject"])) or _AGGREGATE_RE.search(normalize(item["quote"])))
+        item["subject"] == WITHHELD_SUBJECT or _AGGREGATE_SUBJECT_RE.search(normalize(item["subject"]))
+        or _AGGREGATE_RE.search(normalize(item["quote"])))
 
 
 def _company_words(subject):
-    """Normalised company name as words: case, punctuation, possessive and legal suffixes ignored."""
+    """Normalised company name as words: case, punctuation, possessive, a leading "the" and legal suffixes
+    ignored."""
     words = _NAME_WORD.findall(_POSSESSIVE.sub("", normalize(subject).casefold()))
     while len(words) > 1 and words[-1] in _SUFFIXES:
         words.pop()
+    if len(words) > 1 and words[0] == "the":
+        words.pop(0)
     return tuple(words)
 
 
