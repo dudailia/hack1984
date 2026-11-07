@@ -130,6 +130,11 @@ FAKE_TAVILY_PORT=8702
 OLLAMA_MODEL=qwen3:8b
 ```
 
+Warning: `app.run` and `fake_tavily` read the shell environment before `.env`; the Gate and the Planner read
+only `.env`. A stray `GATE_PORT` in the shell therefore wins: `app.run` talks to that port while the Gate it
+started listens on the `.env` port. Run `unset APP_PORT GATE_PORT FAKE_TAVILY_PORT` first, or keep the ports
+only in `.env`.
+
 Start everything with one command. It starts the Gate and the local Tavily stand-in as child processes, waits for
 both to be healthy, and prints the UI address with this launch's token; Ctrl-C stops all three:
 
@@ -144,6 +149,8 @@ Open the printed address in a browser. The token is required by the page's API c
 |---|---|
 | All tests | `python3 -m unittest discover` |
 | Start the app, the Gate and the Tavily stand-in | `python3 -m app.run` (prints the UI address with its token) |
+| Start the Gate on its own | `python3 -m gate.server` (127.0.0.1:GATE_PORT; `app.run` already starts it) |
+| Live Planner check against the local Ollama | `PLANNER_LIVE=1 python3 -m unittest planner.tests.test_live -v` (skipped without `PLANNER_LIVE=1`) |
 | Export a session as a signed bundle | `python3 -m proof.export <session_id>` (writes `bundles/<session_id>.json`) |
 | Verify a bundle offline | `python3 proof/verify.py bundles/<session_id>.json` (prints VALID or INVALID with the row; `--json` for machine output) |
 | Change one byte of a copy and verify it | `python3 -m proof.tamper bundles/<session_id>.json <seq>` |
