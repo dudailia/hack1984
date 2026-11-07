@@ -270,7 +270,8 @@ decision blocked, rule secret.buyer, time 2026-11-07T23:41:26.510Z → hash
 - code_hashes: SHA-256 of every .py file under gate/ and checks/, tests excluded, keyed by repo-relative path.
 - Signed message: `canonical_json({"code_hashes":…,"exported":…,"head":…,"session_id":…,"v":1})`, Ed25519 via
   `cryptography`. The private key is in `ledger/ed25519_private.pem` (gitignored), created on first export.
-- Verifier: `python3 proof/verify.py BUNDLE [--json]`, using only the standard library and `cryptography`. In order:
+- Verifier: `python3 proof/verify.py BUNDLE [--json] [--pubkey FINGERPRINT]`, using only the standard library and
+  `cryptography`. In order:
   1. the file bytes equal the canonical re-serialization (`parse_error`, `not_canonical`);
   2. hex fields are lowercase hex of the right length (`bad_hex`);
   3. per row: seq (`seq_gap`), session_id (`session_mismatch`), prev_hash (`prev_mismatch`), and hash over the row
@@ -278,10 +279,15 @@ decision blocked, rule secret.buyer, time 2026-11-07T23:41:26.510Z → hash
   4. per reveal: only on an allowed attempt (`reveal_on_blocked`, `reveal_on_result`), and
      SHA-256(nonce || payload UTF-8) = commitment (`reveal_mismatch`);
   5. head = the last hash (`head_mismatch`);
-  6. the signature verifies (`bad_signature`).
-- `--json` output: `{"valid":false,"rows_checked":3,"broken_at_seq":3,"reason":"hash_mismatch","bundle_head":"…"}`.
-  Text output: `VALID` or `INVALID: row 3 hash_mismatch`. Exit code 0 if valid, 1 if not. Every single-byte edit of a
-  bundle must give INVALID (Anant's test).
+  6. the signature verifies (`bad_signature`);
+  7. only with `--pubkey`: the signer key's fingerprint equals FINGERPRINT (`unexpected_signer`).
+- Signer key fingerprint: `signer_key_sha256` = SHA-256 of the raw 32-byte Ed25519 public key, lowercase hex.
+  `--pubkey` takes the full 64 hex or its first 16 hex (as printed in the text output).
+- `--json` output: `{"valid":false,"rows_checked":3,"broken_at_seq":3,"reason":"hash_mismatch","bundle_head":"…","signer_key_sha256":"…"}`.
+  `signer_key_sha256` is null when `public_key` is not valid hex.
+  Text output: `VALID (signer key <first 16 hex of signer_key_sha256>)`, or `INVALID: row 3 hash_mismatch`, or
+  `INVALID: unexpected_signer`. Exit code 0 if valid, 1 if not. Every single-byte edit of a bundle must give INVALID
+  (Anant's test).
 
 ## 9. Results file
 Real: `shared/results/results.json`. Example: `shared/fixtures/results_example.json` (`"example": true`; the UI shows a
@@ -402,3 +408,5 @@ the `X-DT-Token` header).
 - 2026-11-07: §11 app/run.py also serves `/shared/results/…` statically, read only.
 - 2026-11-07: §10 `proof_result` adds optional `signer_key_sha256` (lowercase hex or null).
 - 2026-11-07: §11 run loop contract: `start_run(...)` and `emit(type, session_id, data)`.
+- 2026-11-07: §8 verifier prints `VALID (signer key <16 hex>)`, `--json` adds `signer_key_sha256`, new optional
+  `--pubkey FINGERPRINT` fails with `unexpected_signer` when another key signed.
