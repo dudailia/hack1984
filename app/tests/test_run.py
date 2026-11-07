@@ -407,11 +407,20 @@ class StubLoopContractTest(unittest.TestCase):
 
 class LoaderTest(unittest.TestCase):
     def test_falls_back_to_stub_when_loop_missing(self):
-        fn, is_stub = run.load_start_run()
-        if os.path.exists(os.path.join(run.REPO, "app", "loop.py")):
-            self.skipTest("app/loop.py exists")
+        real = run.importlib.util.find_spec
+        with mock.patch.object(run.importlib.util, "find_spec",
+                               side_effect=lambda name, *a: None if name == "app.loop" else real(name, *a)):
+            fn, is_stub = run.load_start_run()
         self.assertIs(fn, _loop_stub.start_run)
         self.assertTrue(is_stub)
+
+    def test_uses_app_loop_when_present(self):
+        if not os.path.exists(os.path.join(run.REPO, "app", "loop.py")):
+            self.skipTest("app/loop.py not merged")
+        from app import loop
+        fn, is_stub = run.load_start_run()
+        self.assertIs(fn, loop.start_run)
+        self.assertFalse(is_stub)
 
     def test_tamper_helper_absent_is_none(self):
         if os.path.exists(os.path.join(run.REPO, "proof", "tamper.py")):
