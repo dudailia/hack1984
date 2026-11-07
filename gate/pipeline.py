@@ -20,9 +20,17 @@ R_FAKE = "gate.fake_not_allowed"
 R_ANTHROPIC = "gate.anthropic_not_reader"
 R_UNKNOWN_ID = "gate.unknown_result_id"
 R_CHECK_ERROR = "gate.check_error"
+R_PATH = "gate.path_not_allowed"
 PRE_RULES = {R_UNKNOWN_ID}
 
+ANTHROPIC_VERSION = "2023-06-01"
+# Exact POST destinations: host -> path for each kind. Anything else is gate.path_not_allowed.
+KIND_PATH = {"search": "/search", "extract": "/extract", "reader": "/v1/messages"}
+TAVILY_PATHS = {"/search", "/extract"}
+ANTHROPIC_PATHS = {"/v1/messages"}
+
 GATE_DETAIL = {
+    R_PATH: "path is not allowed for this destination and kind",
     R_HOST: "destination is not on the allowlist for this session and kind",
     R_FAKE: "the local Tavily stand-in is not allowed in a real session",
     R_ANTHROPIC: "api.anthropic.com is for reader jobs only",
@@ -43,15 +51,47 @@ def _valid_check_result(r):
     return True
 
 
+class GateConfigError(Exception):
+    """A required key is missing from .env. Raised before any ledger row; nothing is sent."""
+
+
 class Pipeline:
-    def __init__(self, ledger, sessions, transport, run_all, fake_port):
+    def __init__(self, ledger, sessions, transport, run_all, fake_port, keys=None):
         self.ledger = ledger
         self.sessions = sessions
         self.transport = transport
         self.run_all = run_all
         self.fake = f"127.0.0.1:{int(fake_port)}"
+        self._keys = dict(keys or {})  # {"tavily": ..., "anthropic": ...} from .env; never logged
 
-    def gate_rule(self, session, kind, destination):
+    def __repr__(self):
+        return "Pipeline()"
+
+    def _headers(self, destination):
+        """Only the Gate builds outbound headers, from its own .env keys. Callers never supply any."""
+        if destination == TAVILY:
+            key = self._keys.get("tavily")
+            if not key:
+                raise GateConfigError("TAVILY_API_KEY is not set")
+            return {"Authorization": f"Bearer {key}"}
+        if destination == ANTHROPIC:
+            key = self._keys.get("anthropic")
+            if not key:
+                raise GateConfigError("ANTHROPIC_API_KEY is not set")
+            return {"x-api-key": key, "anthropic-version": ANTHROPIC_VERSION}
+        return {}
+
+    def path_rule(self, kind, destination, path):
+        allowed = ANTHROPIC_PATHS if destination == ANTHROPIC else TAVILY_PATHS
+        if path not in allowed or KIND_PATH.get(kind) != path:
+            return R_PATH
+        return None
+
+    def gate_rule(self, session, kind, destination, path):
+        rule = self._host_rule(session, kind, destination)
+        return rule or self.path_rule(kind, destination, path)
+
+    def _host_rule(self, session, kind, destination):
         if destination not in (TAVILY, ANTHROPIC, self.fake):
             return R_HOST
         if destination == self.fake and session["source"] != "fake":
@@ -64,18 +104,20 @@ class Pipeline:
             return R_HOST  # invariant 7: fake-only modes never reach the real Tavily
         return None
 
-    def send(self, session_id, component, kind, destination, path, body_obj, headers=None, pre_rule=None,
-             credits_fn=None):
+    def send(self, session_id, component, kind, destination, path, body_obj, pre_rule=None, credits_fn=None):
         session = self.sessions.get(session_id)
         enforce = self.sessions.enforce(session_id)
 
         # 1. one canonical serialization; these exact bytes are checked, committed and sent
         payload = canonical_json(body_obj)
 
-        # 2. Gate rules
+        # 2. Gate rules (host first, then exact path)
         if pre_rule is not None and pre_rule not in PRE_RULES:
             raise ValueError("unknown pre_rule")
-        g_rule = pre_rule or self.gate_rule(session, kind, destination)
+        g_rule = self.gate_rule(session, kind, destination, path) or pre_rule
+        headers = {}
+        if not g_rule:
+            headers = self._headers(destination)  # missing key: GateConfigError, before any row
 
         # 3. checks, always
         try:

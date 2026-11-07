@@ -6,7 +6,7 @@ import unittest
 
 from gate import tavily
 from gate.ledger import Ledger
-from gate.pipeline import Pipeline
+from gate.pipeline import GateConfigError, Pipeline
 from gate.session import SessionStore
 from gate.tests.test_canonical import PAYLOAD
 from gate.canonical import canonical_json
@@ -67,6 +67,22 @@ class TestParse(unittest.TestCase):
     def test_float_credits(self):
         self.assertEqual(tavily.parse_search(tavily_reply(1, credits=2.0)[1])[1], 2)
 
+    def test_lone_surrogates_dropped(self):
+        body = ('{"results":[{"url":"https://ok.example.com","title":"a\\ud800b","content":"fine"},'
+                '{"url":"https://x.example.com/\\udfff","title":"t","content":"c"}]}').encode()
+        results, _ = tavily.parse_search(body)
+        self.assertEqual(results, [{"url": "https://ok.example.com", "title": "ab", "content": "fine"}])
+        canonical_json(results)  # must encode
+
+    def test_extract_lone_surrogates_dropped(self):
+        body = ('{"results":[{"url":"https://ok.example.com","raw_content":"bad \\ud800"},'
+                '{"url":"https://ok2.example.com","raw_content":"good"},'
+                '{"url":"https://x.example.com/\\udfff","raw_content":"c"}],'
+                '"failed_results":[{"url":"https://f.example.com/\\ud800"},{"url":"https://f.example.com"}]}').encode()
+        texts, failed, _ = tavily.parse_extract(body)
+        self.assertEqual(texts, {"https://ok.example.com": "bad ", "https://ok2.example.com": "good"})
+        self.assertEqual(failed, ["https://f.example.com"])
+
     def test_bad_entries_skipped(self):
         body = json.dumps({"results": [{"url": 5}, "x", {"url": "https://ok.example.com", "title": None}]}).encode()
         results, _ = tavily.parse_search(body)
@@ -80,6 +96,7 @@ class TestSearch(unittest.TestCase):
         self.store = SessionStore(self.led, memo_tokens_fn=lambda m, t: [])
         self.calls = []
         self.replies = []
+        self.keys = {"tavily": "tvly-K"}
 
     def tearDown(self):
         self.led.close()
@@ -92,13 +109,13 @@ class TestSearch(unittest.TestCase):
     def make(self, sid, mode="doublethink", source="real", check=ALLOW):
         self.store.create({"session_id": sid, "mode": mode, "source": source, "memo": "m", "canary": "c",
                            "confirmed_secrets": [], "approved_public_terms": []})
-        return Pipeline(self.led, self.store, self.transport, lambda p, s, k: check, 8702)
+        return Pipeline(self.led, self.store, self.transport, lambda p, s, k: check, 8702, keys=self.keys)
 
     def test_ids_issued_and_continue(self):
         pipe = self.make("s_tav000001")
         self.replies = [tavily_reply(3), tavily_reply(2, start=3, credits=1)]
-        r1 = tavily.search(pipe, "s_tav000001", "planner", "need_a", "q one", "general", api_key="tvly-K")
-        r2 = tavily.search(pipe, "s_tav000001", "planner", "need_a", "q two", "news", api_key="tvly-K")
+        r1 = tavily.search(pipe, "s_tav000001", "planner", "need_a", "q one", "general")
+        r2 = tavily.search(pipe, "s_tav000001", "planner", "need_a", "q two", "news")
         self.assertEqual(r1["result_ids"], ["r_01", "r_02", "r_03"])
         self.assertEqual(r2["result_ids"], ["r_04", "r_05"])
         s = self.store.get("s_tav000001")
@@ -113,7 +130,7 @@ class TestSearch(unittest.TestCase):
     def test_response_shape_planner(self):
         pipe = self.make("s_tav000002")
         self.replies = [tavily_reply(2)]
-        r = tavily.search(pipe, "s_tav000002", "planner", "n", "q", "general", api_key="tvly-K")
+        r = tavily.search(pipe, "s_tav000002", "planner", "n", "q", "general")
         self.assertEqual(set(r), {"status", "rule", "ledger_seq", "result_ids", "credits_used", "ledger"})
         self.assertEqual((r["status"], r["rule"], r["ledger_seq"], r["credits_used"]), ("sent", None, 1, 1))
         self.assertEqual([row["row_type"] for row in r["ledger"]], ["attempt", "result"])
@@ -124,7 +141,7 @@ class TestSearch(unittest.TestCase):
     def test_tavily_ids_never_passed_on(self):
         pipe = self.make("s_tav000003", mode="single_agent", source="fake")
         self.replies = [tavily_reply(2)]
-        r = tavily.search(pipe, "s_tav000003", "baseline", "n", "q", "general", api_key=None)
+        r = tavily.search(pipe, "s_tav000003", "baseline", "n", "q", "general")
         self.assertNotIn("tavily-internal", json.dumps(r))
         self.assertNotIn("tavily-internal", json.dumps(self.store.get("s_tav000003")))
         self.assertEqual(r["results"][0], {"result_id": "r_01", "title": "Title 0",
@@ -133,22 +150,23 @@ class TestSearch(unittest.TestCase):
     def test_real_destination_and_auth(self):
         pipe = self.make("s_tav000004")
         self.replies = [tavily_reply(1)]
-        tavily.search(pipe, "s_tav000004", "planner", "n", "q", "general", api_key="tvly-K")
+        tavily.search(pipe, "s_tav000004", "planner", "n", "q", "general")
         dest, path, payload, headers = self.calls[0]
         self.assertEqual((dest, path), ("api.tavily.com", "/search"))
         self.assertEqual(headers, {"Authorization": "Bearer tvly-K"})
         self.assertEqual(payload, canonical_json(tavily.search_body("q", "general")))
 
     def test_real_without_key_refused_before_ledger(self):
+        self.keys = {}
         pipe = self.make("s_tav000009")
-        with self.assertRaises(tavily.TavilyError):
-            tavily.search(pipe, "s_tav000009", "planner", "n", "q", "general", api_key=None)
+        with self.assertRaises(GateConfigError):
+            tavily.search(pipe, "s_tav000009", "planner", "n", "q", "general")
         self.assertEqual(self.led.rows("s_tav000009"), [])
 
     def test_fake_destination_no_auth_no_credits(self):
         pipe = self.make("s_tav000005", mode="compromised", source="fake")
         self.replies = [tavily_reply(1, credits=1)]
-        r = tavily.search(pipe, "s_tav000005", "baseline", "n", "q", "general", api_key="tvly-K")
+        r = tavily.search(pipe, "s_tav000005", "baseline", "n", "q", "general")
         dest, path, payload, headers = self.calls[0]
         self.assertEqual(dest, "127.0.0.1:8702")
         self.assertNotIn("Authorization", headers)
@@ -158,7 +176,7 @@ class TestSearch(unittest.TestCase):
 
     def test_blocked(self):
         pipe = self.make("s_tav000006", check={"decision": "block", "rule": "canary", "detail": "canary seen"})
-        r = tavily.search(pipe, "s_tav000006", "planner", "n", "q", "general", api_key="tvly-K")
+        r = tavily.search(pipe, "s_tav000006", "planner", "n", "q", "general")
         self.assertEqual(r, {"status": "blocked", "rule": "canary", "detail": "canary seen", "ledger_seq": 1,
                              "result_ids": [], "credits_used": 0, "ledger": r["ledger"]})
         self.assertEqual(self.calls, [])
@@ -168,7 +186,7 @@ class TestSearch(unittest.TestCase):
     def test_http_error(self):
         pipe = self.make("s_tav000007")
         self.replies = [(401, b'{"detail":{"error":"Unauthorized"}}')]
-        r = tavily.search(pipe, "s_tav000007", "planner", "n", "q", "general", api_key="tvly-K")
+        r = tavily.search(pipe, "s_tav000007", "planner", "n", "q", "general")
         self.assertEqual((r["status"], r["result_ids"], r["credits_used"]), ("error", [], 0))
         self.assertEqual(r["ledger"][1]["http_status"], 401)
         self.assertEqual(self.store.get("s_tav000007")["call_count"], 1)
@@ -177,7 +195,7 @@ class TestSearch(unittest.TestCase):
         pipe = self.make("s_tav000008")
         self.store.state("s_tav000008").next_result_n = 99
         self.replies = [tavily_reply(2)]
-        r = tavily.search(pipe, "s_tav000008", "planner", "n", "q", "general", api_key="tvly-K")
+        r = tavily.search(pipe, "s_tav000008", "planner", "n", "q", "general")
         self.assertEqual(r["result_ids"], ["r_99"])
         # text was received even for the result that got no id: provenance must see it
         self.assertIn("Content 1", self.store.get("s_tav000008")["public_text_received"])
@@ -196,7 +214,7 @@ class TestSessionCounters(unittest.TestCase):
         self.seen = []        # snapshot of the session as run_all saw it
         self.block_next = False
         self.replies = []
-        self.pipe = Pipeline(self.led, self.store, self.transport, self.run_all, 8702)
+        self.pipe = Pipeline(self.led, self.store, self.transport, self.run_all, 8702, keys={"tavily": "tvly-K"})
 
     def tearDown(self):
         self.led.close()
@@ -214,7 +232,7 @@ class TestSessionCounters(unittest.TestCase):
 
     def search(self, q, block=False):
         self.block_next = block
-        return tavily.search(self.pipe, "s_count0001", "planner", "n", q, "general", api_key="tvly-K")
+        return tavily.search(self.pipe, "s_count0001", "planner", "n", q, "general")
 
     def test_sequence_sent_blocked_error_sent(self):
         self.replies = [tavily_reply(2, credits=1)]
