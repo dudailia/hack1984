@@ -1,0 +1,3 @@
+- Harmless dummy payload one: the sky is clear over the harbour today.
+- Harmless dummy payload two: remember to water the office plants on Friday.
+- Harmless dummy payload three: this sentence exists only as a test fixture.
