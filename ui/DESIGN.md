@@ -4,7 +4,9 @@ Owner: Sheara. Source of truth for event names, fields, endpoints and paths: sha
 Anything below marked **TO CONFIRM** is not in FORMATS.md and must be agreed with its owner before code depends on it.
 Section 10 lists the open and resolved items.
 
-Direction: **two rooms and a wall**, dressed as HACK1984: black, off-white, one red, monospace.
+Direction: **two rooms and a wall**, dressed as HACK1984: black, off-white, one red, monospace. The finish is a
+**telescreen** (a watching eye, static scanlines and grain) showing a **classified dossier** (the memo as a file with a
+CONFIDENTIAL stamp and redaction bars).
 The screen must make three things obvious with no explanation:
 1. The secret is in one room and the web is in another, and they never touch.
 2. Every request that leaves passes one gate, and blocked requests show in red.
@@ -35,7 +37,7 @@ Contrast ratios were computed with the WCAG 2.x relative-luminance formula.
 | --surface-2 | #1E1E1E | rows on hover, memo block, buttons | – |
 | --text | #EDEAE2 | body text, numbers, the wall | 16.5:1 on --bg, 13.9:1 on --surface-2 |
 | --text-muted | #A8A49C | labels, secondary fields, hashes | 8.0:1 on --bg, 6.7:1 on --surface-2 |
-| --text-dim | #8A867F | tertiary info only (timestamps) | 5.5:1 on --bg, 4.6:1 on --surface-2 |
+| --text-dim | #9C978F | tertiary info only (ledger hashes, title small print) | 6.8:1 on --bg, 5.8:1 on --surface-2 |
 | --line | #3A3A3A | decorative dividers only, never text or control edges | – |
 | --control-edge | #A8A49C | button and input borders (3:1 needed) | 8.0:1 on --bg |
 | --red | #FF4A3D | leak or block text, borders, bars | 5.9:1 on --bg, 5.0:1 on --surface-2, 5.5:1 on --red-bg |
@@ -45,7 +47,28 @@ Contrast ratios were computed with the WCAG 2.x relative-luminance formula.
 | --calm-bg | #0A2226 | VALID panel fill | --text on it 13.8:1 |
 | --focus | #EDEAE2 | focus ring | 16.5:1 |
 
-The results file's example banner is not a leak, so it is styled off-white on black, never red.
+The results file's example banner is not a leak, so it is styled off-white on black, never red. The same goes for the
+CONFIDENTIAL stamp on the memo and the VERIFYING RUN label: both are off-white.
+
+### Telescreen atmosphere and contrast
+- Two fixed overlays sit above the page with `pointer-events: none`. Both are static, with no flicker and no loop.
+  - Scanlines: `repeating-linear-gradient`, a 1px line of black at 5% alpha every 3px (`--scan-alpha: 0.05`).
+  - Grain: an inline SVG `feTurbulence` data URI, black only, at 3% (`--grain-alpha: 0.03`).
+- Both overlays only darken, never lighten. That keeps the ratio between text and its background close to the
+  original, because both get darker together.
+- Worst case, computed per pixel: a text pixel hit by a scanline and dark grain, next to a background pixel hit by a
+  scanline only.
+
+  | Pair | Contrast |
+  |---|---|
+  | --text-dim on --surface-2 | 5.0:1 |
+  | --text-muted on --surface-2 | 5.8:1 |
+  | --red on --surface-1 | 4.8:1 |
+  | --red on --red-bg | 4.7:1 |
+  | --calm on --surface-2 | 7.3:1 |
+
+  That is why --text-dim went from #8A867F to #9C978F. Red text is never placed on --surface-2.
+- Under `prefers-reduced-motion: reduce` both overlays are hidden.
 
 ## 2. Type
 
@@ -77,7 +100,7 @@ Scale, sized for 1280x720 on a projector. **Nothing is smaller than 16px.**
 The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16px`, `--sp-5: 24px`, `--sp-6: 32px`,
 `--sp-7: 48px`.
 - Room padding is --sp-4. Gaps between rows are --sp-2, and gaps between groups are --sp-5.
-- The wall is 4px wide. The packet is a 12px square.
+- The wall is 8px wide (`--wall`). The wordmark's wall in the header is 4px. The packet is a 16px square.
 - Corners are square (border-radius 0) to match the event's look.
 
 ## 4. Layout
@@ -90,8 +113,13 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
   - Download bundle and Tamper one byte live in the proof panel (section 6), so the header fits 1280px.
 - Main area, about 576px: three columns sized 1fr, 1.3fr and 1fr. The middle column is wider because it holds the
   ledger.
-- Footer, 88px: the answer bar and the metrics strip.
+- Footer, 88px: the answer bar and four big counter cells (section 4, "Big counters").
 - Every room scrolls on its own, and the ledger auto-scrolls to the newest row. The page itself never scrolls.
+- The Planner room and the One agent room each have two scroll regions:
+  - the dossier on top, at most 48% of the room;
+  - typed facts or web text below, with its own scroll.
+
+  Scrolling to the planted line or to the newest typed fact moves only the lower region, so the memo stays in view.
 - The panels are cleared on `run_started`.
 - The source badge comes from `run_started.data.source`. It reads `SOURCE: LOCAL STAND-IN (fake)` or
   `SOURCE: api.tavily.com (real)`, so nobody can mistake a fake run for a real one.
@@ -119,9 +147,13 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
 |                                     LEAKS 0 · BLOCKED 1 · CREDITS 2 · 13.7 s           |
 +---------------------------------------------------------------------------------------+
 ```
-- **The wall** is the two 4px off-white bars on either side of the Gate column. It is the strongest line on the
-  screen. The only opening is the EXIT marker at the top of the Gate, and packets leave there and nowhere else.
-  - EXIT lists the destinations allowed for this run, using the same strings as `row.destination`:
+- **The wall** is the two 8px off-white bars on either side of the Gate column. It is the strongest line on the
+  screen.
+  - The only opening is the exit bar at the top of the Gate. It has a 2px off-white top edge and the label
+    `ONLY DOOR OUT ▲`. Packets leave there and nowhere else.
+  - In single agent layout the label reads `EXIT ▲`, because there is no wall.
+  - The exit bar lists the destinations allowed for this run, as full hosts (it is the allowlist), using the same
+    strings as `row.destination`:
     - source real: `api.tavily.com`
     - source fake: `127.0.0.1:<FAKE_TAVILY_PORT>`, which is `127.0.0.1:8702` in the fixture
     - both: `api.anthropic.com (reader only)`
@@ -134,8 +166,10 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
   - Below the memo is a "Typed facts" list built from `planner_typed.data`: need, found, then each of `values[]` as
     value, unit, period and result_id. There is no web text here, and the room's subtitle says so.
 - **Gate ledger** (one entry per `ledger_row` event, using `data.row` and `data.display`):
-  - Attempt rows (`row_type "attempt"`) show `seq`, `kind`, `destination` (shortened), `display.query` (or
+  - Attempt rows (`row_type "attempt"`) show `seq`, `kind`, a short destination, `display.query` (or
     `display.summary` for reader rows), and the decision mark: `✓` cyan for allowed, `✕ BLOCKED` red for blocked.
+  - Short destinations: `api.tavily.com` → `tavily`, `api.anthropic.com` → `anthropic`, `127.0.0.1:8702` →
+    `fake:8702`. The full host is in the `title` tooltip.
   - Result rows (`row_type "result"`) are indented one line under their attempt (`attempt_seq`) in --text-muted, for
     example `↳ 200 · 1 credit` from `http_status` and `credits_used`.
   - Each row shows a short `hash` (first 4 and last 4 hex). The proof walk uses it.
@@ -153,11 +187,19 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
     and `source.result_id`.
   - When `headline` is not null, it shows value, unit, period and `method`.
   - Every number is copied straight from the event and never reformatted beyond adding the unit symbol.
-- **Metrics strip:**
+- **Counters** (see "Big counters" below):
   - LEAKS and BLOCKED are counted live from `ledger_row` events and then taken from `run_done.data.leaks` and
     `run_done.data.blocked`. They turn red only when they are above 0.
   - CREDITS is the running sum of `ledger_row.data.credits_used`, then `run_done.data.credits_total`.
-  - Seconds comes from `run_done.data.seconds`. CREDITS and seconds always use --text.
+  - TIME comes from `run_done.data.seconds`. CREDITS and TIME always use --text.
+- **One story on screen.** Each session keeps its own rows, answer, `run_done` data and counters. The ledger, the
+  answer bar, the counters, the source badge and the gate header always describe the same run, `S.view`.
+  - When a `proof_result` arrives for an earlier run (in the demo, `s_dtreal1` after the careless run), all of them
+    switch to that run together.
+  - A boxed off-white label above the ledger then reads
+    `VERIFYING RUN s_dtreal1 · doublethink · real · answered`. It is built from that run's `run_started` and
+    `run_done`.
+  - Closing the proof panel (V) brings the latest run back.
 - **two_minds:** same layout. The gate header reads `RECORDING ONLY · NOT ENFORCING` in muted text, because in
   fake-only modes the decision is always `allowed` (FORMATS §1).
 
@@ -185,34 +227,86 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
 - **Resolved (section 10, item 3):** when the toggle is on Single agent, Run posts `mode: "compromised"` with
   `source: "fake"` (notes/DEMO.md). In replay mode the toggle only switches the layout.
 
+### Telescreen and dossier elements
+- **Title screen.**
+  - What it shows:
+    - an original ASCII-art eye (7 lines, 16px);
+    - DOUBLETHINK at --fs-6, split by an 8px wall;
+    - the line "The cloud model never sees your secret. The local model never reads the web." at --fs-2;
+    - `press Space` with the cursor (`press any key` in live mode);
+    - the small print `offline replay · all companies, people and deals are fictional`.
+  - When it shows:
+    - on load, and after R;
+    - it is skipped when `?at=` is greater than 0 or `?title=0` is set.
+  - How it goes away:
+    - Space or a click starts playback and fades the title out (250ms, opacity);
+    - in live mode it goes away on the first `run_started` or on any key.
+- **Dossier memo.** Both rooms with a memo show it as a file:
+  - a header line `> FILE 1984 · SUBJECT: <memo_loaded.title> · sha <first 4…last 4 of memo_loaded.sha256>`;
+  - an off-white double-ruled `CONFIDENTIAL` stamp, rotated -3deg;
+  - then the memo text.
+
+  Redaction in the Planner room:
+  - It is case-insensitive, so the subject `PROJECT HALYARD` and the memo's first line are hidden like
+    `Project Halyard`.
+  - `memo_id` is never shown, because it repeats the codename.
+  - The One agent room shows everything in the clear, because that agent holds the secrets.
+- **The eye.** A 5-line ASCII eye sits at the right of the gate header.
+  - It is **open** in single agent layout (one model sees everything) and **closed**, as a lid line with lashes, in
+    Doublethink layout (nothing can leave).
+  - At a leak, a red copy of the open eye fades in on top. Red here means the leak.
+  - The eye resets on `run_started`. A screen-reader line states its state.
+- **Big counters.**
+  - LEAKS, BLOCKED, CREDITS and TIME sit in boxed cells (2px --line border) with values at --fs-4 (TIME at --fs-2).
+  - When a value rises, it rolls (M11).
+  - The LEAKS and BLOCKED cells get a red border and a red value when above 0.
+- **No empty rooms.** Before their first event, the rooms show `>` waiting lines with a cursor:
+  - `> waiting for the memo`
+  - `> no numbers yet`
+  - `> waiting for the first request`
+  - `> waiting for web text`
+
+  Each line is replaced by content as soon as its first event arrives.
+
 ## 5. Motion
 
 - One easing curve for the whole page: `--ease: cubic-bezier(0.2, 0, 0, 1)` (a fast start and a soft stop).
 - Durations: `--dur-s: 150ms`, `--dur-m: 200ms`, `--dur-l: 250ms`.
 - Only `transform` and `opacity` are animated. A color change is done by fading in a pseudo-element layer that
   already has the new color.
-- Motion never blocks input or delays the next event. Animations run while the replay keeps going.
+- Motion never blocks input or delays the next event. Animations run while the replay keeps going. Each moment is a
+  set of CSS animation delays plus fire-and-forget timers, all timed from the arrival of the attempt row (t = 0).
+- Packets live in a fixed `#fx` layer and move with the Web Animations API on `transform` only. Their positions come
+  from the sending room, the new row and the exit bar.
+- On seek or jump (`→`, `?at=`) everything is applied instantly, with no packets, typing, shakes or ticks.
 
-| # | Moment (trigger) | Motion | Duration / easing |
+| # | Moment (trigger) | Motion | Timing |
 |---|---|---|---|
-| M1 | A request leaves a room (`ledger_row`, attempt row) | A 12px off-white packet moves with translateX from the edge of the sending room (`row.component`) into the Gate column. Planner starts at the left room, reader at the right room, baseline at the one-agent room. | 200ms, --ease |
-| M2 | Gate allows (attempt `decision "allowed"`, `rule` null) | The row lands (translateY -8px→0, opacity 0→1). The packet then moves up to EXIT with translateY and fades out (opacity →0). The `✓` mark fades in cyan. | row 150ms; packet 200ms; both --ease |
-| M3 | Gate blocks (`blocked` event) | The packet stops at the EXIT wall. The ledger row shakes (translateX 0, -6, 6, -4, 4, 0 px). The red layer fades in behind the row and `✕ BLOCKED · rule` appears. The packet fades out in red where it stopped. | shake 250ms; red layer 150ms; packet fade 200ms; all --ease |
-| M4 | Reader reads the poisoned page (`docs_read` where a doc has `highlights`) | The card fades in. The red highlight layer on the planted line fades in after it. **Nothing moves toward the wall:** no packet and no row. The Planner's typed list gets numbers only. | card 150ms; highlight 150ms, 150ms delay; --ease |
-| M5 | Single agent leaks (allowed attempt with a non-null `rule`) | The row lands as in M2. The secret words flash: the red highlight layer's opacity goes 0→1→0.35→1, which is two flashes. The LEAKED stamp arrives with scale 1.2→1 and opacity 0→1 and stays slightly rotated (-4deg). | flash 2 × 200ms; stamp 200ms; --ease |
+| M1 | A request leaves a room (any attempt `ledger_row`) | A 16px off-white packet slides from the edge of the sending room into the gate at the row's height. Planner and baseline come from the left, reader from the right. | 0–200ms |
+| M2 | Gate allows (attempt `decision "allowed"`, `rule` null) | The row lands (translateY -8px→0, opacity). The packet rises to the exit bar, then leaves upward and fades. The cyan `✓` is part of the row. | row 0–150ms; packet 200–400ms rise, 400–600ms out |
+| M3 | **Gate blocks** (attempt `decision "blocked"`, then the `blocked` event) | The packet rises and **stops just under the exit bar** at 400ms. Its red layer fades in. A red line flashes on the exit bar (opacity 0→1→0). The packet and the row **shake** together (translateX 0, -8, 8, -6, 6, -3, 0 px). The row's red layer and red left edge fade in. At 650ms the **BLOCKED stamp slams** down (rotate -4deg, scale 1.6→1, opacity 0→1). The `✕ BLOCKED` mark, the rule and the planted tag appear, and the BLOCKED counter rolls to 1. The packet fades where it stopped. | packet 0–400ms; shake 400–650ms; exit flash 400–850ms; red layer 400–550ms; stamp 650–850ms; packet fade 650–850ms |
+| M4 | Reader reads the poisoned page (`docs_read` where a doc has `highlights`) | The card fades in. The planted-instruction label fades in after it. **Nothing moves toward the wall:** no packet and no row. The Planner's typed list gets numbers only. | card 150ms; label 150ms after a 150ms delay |
+| M5 | **Single agent leaks** (allowed attempt with a non-null `rule`) | The packet slides in and rises like M2, turns red at 300ms, and leaves through the exit. The query types out, and each secret word's red mark appears with its first letter. At 400ms the secret words **flash twice** (opacity 1, 0.3, 1, 0.3, 1). At 800ms the **LEAKED stamp slams** down. The row's red layer and edge, the `✕ LEAKED` mark and the rule appear. The **eye turns red**, and the LEAKS counter rolls to 1. | packet 0–600ms; typing 0–350ms; flash 400–800ms; stamp 800–1000ms |
 | M6 | Verify proof (`proof_result`, `valid: true`) | The ledger rows tick from the top down to `rows_checked`. Each row's `✓` fades in cyan. Then the VALID stamp arrives with scale 0.96→1 and opacity. | 80ms per row, with the whole walk capped at 1200ms (the step becomes 1200/n); stamp 200ms; --ease |
 | M7 | Tamper (`proof_result`, `tampered: true`, `valid: false`) | The walk ticks rows above `broken_at_seq` with `✓`. That row and every row below it then turn red from the top down, each with a `✕`. The row at `tampered_seq` is tagged `1 byte edited`. The INVALID stamp shows `row {broken_at_seq} · {reason}`. | 80ms per good row; 40ms stagger per broken row, capped at 600ms; stamp 200ms; --ease |
-| M8 | Mode switch (toggle, key 1 or 2, or a new `run_started.data.mode`) | The wall bars fade (opacity 1→0 into single agent, 0→1 back). The grid switches at once, because grid changes are not animated. | 250ms, --ease |
-| M9 | Answer sheet opens (A or click) | The sheet slides up with translateY 16px→0 and opacity 0→1 | 200ms, --ease |
+| M8 | Mode switch (toggle, key 1 or 2, or a new `run_started.data.mode`) | The wall bars fade (opacity 1→0 into single agent, 0→1 back). The eye opens or closes (scaleY 0.15↔1 with an opacity crossfade between the open and closed drawings). The grid switches at once, because grid changes are not animated. | 250ms |
+| M9 | Answer sheet opens (A or click) | The sheet slides up with translateY 16px→0 and opacity 0→1 | 200ms |
+| M10 | An outgoing query appears (attempt row with `display.query`) | The query types out: each character is a span that fades in (opacity), staggered so the whole query takes at most 350ms. | ≤ 350ms in total |
+| M11 | A counter value changes | The old value moves up and out (translateY 0→-100%, opacity 1→0) while the new value comes up from below. | 200ms |
+| M12 | A room is waiting for its first event | The `▌` cursor pulses (opacity 1↔0.15, alternate). **This is the only looping animation.** It exists only on waiting lines, which are replaced by content on the first event. | 530ms per half-cycle |
+
+All motion uses `--ease`. Durations at or under 250ms, except the sequences above, which are made of such steps.
 
 - The proof walk only replays what `proof_result` already says. It starts after the event arrives, so the UI never
   shows a verdict the verifier did not return.
 - **`prefers-reduced-motion: reduce`:**
-  - Every transform animation is turned off: no packet, no shake, no stamp scaling, no slide.
-  - States still change, either at once or with a plain 150ms opacity fade.
+  - Every animation and transition is turned off: no packet, no typing, no shake, no stamp scaling, no counter roll,
+    no slide, no cursor pulse.
+  - The scanlines and grain are hidden.
+  - States still change, at once.
   - The proof walk shows every check mark at once, then the verdict.
   - The leak flash becomes a steady highlight.
-- Nothing loops forever, and nothing is decorative.
+- Nothing loops forever except the waiting cursor (M12), and nothing is decorative. The atmosphere is static.
 
 ## 6. Proof panel
 
@@ -220,6 +314,7 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
   walk happens there.
 - Contents, top to bottom:
   - `PROOF · session {session_id}`, from the event envelope.
+  - The boxed label `VERIFYING RUN {session_id} · {mode} · {source} · {outcome}`, the same as above the ledger.
   - `bundle head {first 4…last 4}` from `proof_result.data.bundle_head`, with the full hash on hover.
   - `rows checked {rows_checked}`.
   - The verdict stamp at --fs-5:
@@ -238,8 +333,9 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
   - The session is the one from the latest `run_done`.
 - **Replay mode:**
   - `proof_result` events come from the fixture, and the panel is labeled `replay`.
-  - Verify and Tamper step to the next recorded `proof_result`.
-  - Download bundle is disabled with the tooltip "live mode only", because there is no bundle file in the fixtures.
+  - Verify plays the recorded `proof_result` with `tampered: false`, and Tamper plays the one with `tampered: true`.
+  - Download bundle shows the message "Download bundle is available in live mode.", because there is no bundle file
+    in the fixtures.
 
 ## 7. Results screen (`beat.data.screen = "results"`, or key S)
 
@@ -309,8 +405,17 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
   `http://127.0.0.1:8703/ui/index.html`. On this Windows machine the command is `python`, not `python3`. In live mode
   the same files are served by app/run.py on `APP_PORT` (8700).
   - Port 8703 is the agreed preview port (section 10, item 5).
-- **Replay or live:** the page is live when its URL has `?token=` and replays the fixture otherwise. `?replay=1`
-  forces replay, and `?at=<ms>` jumps the replay to that time (for screenshots and the presenter).
+- **Replay or live:** the page is live when its URL has `?token=` and replays the fixture otherwise.
+- **URL parameters** for rehearsal and screenshot QA:
+
+  | Parameter | Effect |
+  |---|---|
+  | `?replay=1` | forces replay even with a token |
+  | `?at=<ms>` | jumps the replay to that time (no title screen) |
+  | `?play=1` | starts playing |
+  | `?title=0` | skips the title screen |
+  | `?open=answer` | opens the answer sheet |
+  | `?freeze=<ms>` | with `?at=`, plays the next 100ms of events with animation, then pauses every animation at `<ms>`, so a frame of a moment can be screenshotted (for example `?at=86500&freeze=450` for the block, `?at=20990&freeze=900` for the leak) |
 
 ## 10. Items not in shared/FORMATS.md
 

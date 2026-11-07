@@ -8,6 +8,23 @@
 </head>
 <body>
 
+<!-- Title screen (DESIGN.md section 4a) -->
+<section id="title" class="title-screen" aria-labelledby="title-word">
+  <div class="title-inner">
+    <pre class="eye-big" aria-hidden="true">       _..--~~~~~~~~~~~~~~~~~~~~~--.._
+   _.-~~        _.--~~~~~--._        ~~-._
+ .-~         .-'  .-~~~~~-.  '-.         ~-.
+&lt;           :   :  (@@@@@)  :   :           &gt;
+  '-.         '.  '-.___.-'  .'         .-'
+    '~-.._       '-._____.-'       _..-~'
+           '~~--.._________..--~~'</pre>
+    <h1 id="title-word" class="title-word">DOUBLE<span class="wm-wall" aria-hidden="true"></span>THINK</h1>
+    <p class="title-line">The cloud model never sees your secret.<br>The local model never reads the web.</p>
+    <p class="title-press"><span class="live-only">press any key</span><span class="replay-only">press Space</span><span class="cursor" aria-hidden="true"></span></p>
+    <p class="title-small">offline replay · all companies, people and deals are fictional</p>
+  </div>
+</section>
+
 <header class="top">
   <div class="wordmark" aria-label="Doublethink">DOUBLE<span class="wm-wall" aria-hidden="true"></span>THINK</div>
 
@@ -41,9 +58,10 @@
       <h2 id="planner-title">Planner room</h2>
       <p class="sub">never reads the web</p>
     </header>
-    <div class="scroll">
-      <h3 class="label">Memo</h3>
-      <div id="memo" class="memo"><p class="empty" data-empty></p></div>
+    <div class="pane-top">
+      <div class="dossier" id="dossier"></div>
+    </div>
+    <div class="pane-low" id="planner-low">
       <h3 class="label">Typed facts (numbers only)</h3>
       <ol id="typed" class="typed"></ol>
     </div>
@@ -54,25 +72,43 @@
       <h2 id="agent-title">One agent</h2>
       <p class="sub">sees the memo and the web</p>
     </header>
-    <div class="scroll">
-      <h3 class="label">Memo</h3>
-      <div id="agent-memo" class="memo"><p class="empty" data-empty></p></div>
-      <hr class="divider">
-      <h3 class="label">Web</h3>
-      <div id="agent-web"></div>
+    <div class="pane-top">
+      <div class="dossier" id="agent-dossier"></div>
     </div>
+    <div class="pane-low" id="agent-web"></div>
   </section>
 
   <section id="gate" class="gate" aria-labelledby="gate-title">
-    <header class="room-head">
-      <h2 id="gate-title">The gate</h2>
-      <p class="sub" id="gate-sub">only door out</p>
+    <header class="room-head gate-head">
+      <div>
+        <h2 id="gate-title">The gate</h2>
+        <p class="sub" id="gate-sub">the only way out</p>
+      </div>
+      <div class="eye" id="eye" aria-hidden="true">
+        <pre class="eye-open"> .-~~~~~~~~~~~~~-.
+.'   .-~~~~~-.   '.
+&lt;    ( (@@@) )    &gt;
+'.   '-.._..-'   .'
+ '-~~~~~~~~~~~~~-'</pre>
+        <pre class="eye-red"> .-~~~~~~~~~~~~~-.
+.'   .-~~~~~-.   '.
+&lt;    ( (@@@) )    &gt;
+'.   '-.._..-'   .'
+ '-~~~~~~~~~~~~~-'</pre>
+        <pre class="eye-closed">
+
+&lt;~~~~~~~~~~~~~~~~~&gt;
+ ' ' ' ' ' ' ' ' '
+</pre>
+      </div>
+      <p class="sr-only" id="eye-state"></p>
     </header>
     <div id="exit" class="exit"></div>
+    <p id="run-label" class="run-label"></p>
     <p id="ledger-session" class="ledger-session"></p>
     <div class="scroll" id="ledger-scroll">
       <ol id="ledger" class="ledger" role="log" aria-live="polite" aria-label="Outbound ledger"></ol>
-      <p id="ledger-empty" class="empty">No requests yet. Every request that leaves is written here before it is sent.</p>
+      <p id="ledger-empty" class="empty waiting">&gt; waiting for the first request<span class="cursor" aria-hidden="true"></span></p>
     </div>
   </section>
 
@@ -81,9 +117,7 @@
       <h2 id="reader-title">Reader room</h2>
       <p class="sub">never sees the secret</p>
     </header>
-    <div class="scroll" id="reader-body">
-      <p class="empty">No web text yet.</p>
-    </div>
+    <div class="scroll" id="reader-body"></div>
   </section>
 
   <section id="proof" class="room proof" aria-labelledby="proof-title">
@@ -92,11 +126,12 @@
       <p class="sub" id="proof-session">no session yet</p>
     </header>
     <div class="scroll">
+      <p id="proof-run" class="run-label"></p>
       <dl class="proof-facts">
         <div><dt>bundle head</dt><dd id="proof-head">—</dd></div>
         <div><dt>rows checked</dt><dd id="proof-rows">—</dd></div>
       </dl>
-      <div id="verdict" class="verdict-slot"><p class="empty">Not verified yet. Press Verify proof.</p></div>
+      <div id="verdict" class="verdict-slot"></div>
       <div class="proof-actions">
         <button type="button" id="proof-verify">Verify proof</button>
         <div class="tamper">
@@ -121,15 +156,16 @@
     <span class="open">Open</span>
   </button>
   <dl class="metrics">
-    <div id="m-leaks"><dt>Leaks</dt><dd>0</dd></div>
-    <div id="m-blocked"><dt>Blocked</dt><dd>0</dd></div>
-    <div id="m-credits"><dt>Credits</dt><dd>0</dd></div>
-    <div id="m-seconds"><dt class="sr-only">Seconds</dt><dd>— s</dd></div>
+    <div class="counter" id="m-leaks"><dt>Leaks</dt><dd><span class="num">0</span></dd></div>
+    <div class="counter" id="m-blocked"><dt>Blocked</dt><dd><span class="num">0</span></dd></div>
+    <div class="counter" id="m-credits"><dt>Credits</dt><dd><span class="num">0</span></dd></div>
+    <div class="counter small" id="m-seconds"><dt>Time</dt><dd><span class="num">—</span></dd></div>
   </dl>
 </footer>
 
 <section id="sheet" class="sheet" role="dialog" aria-modal="false" aria-labelledby="sheet-title"></section>
 <section id="results" class="results" aria-labelledby="results-title"></section>
+<div id="fx" class="fx" aria-hidden="true"></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
 <script src="app.js"></script>

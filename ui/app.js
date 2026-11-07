@@ -1,25 +1,11 @@
 // Doublethink UI. Event names and fields: shared/FORMATS.md section 10. Design: ui/DESIGN.md.
 // One dispatcher on env.type serves both the replay file and the live SSE stream.
-// All data is put into the DOM with textContent, never innerHTML.
+// All data goes into the DOM through textContent / text nodes, never innerHTML.
+// Motion never delays the replay: every sequence is CSS delays or fire-and-forget timers.
 'use strict';
 
 (() => {
   const $ = (sel) => document.querySelector(sel);
-
-  function el(tag, props, ...kids) {
-    const n = document.createElement(tag);
-    if (props) {
-      for (const [k, v] of Object.entries(props)) {
-        if (v == null || v === false) continue;
-        if (k === 'class') n.className = v;
-        else if (k === 'text') n.textContent = v;
-        else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
-        else n.setAttribute(k, v === true ? '' : String(v));
-      }
-    }
-    fill(n, kids, false);
-    return n;
-  }
 
   // Append (or replace with) children, flattening nested arrays and skipping null / false.
   function fill(n, kids, replace = true) {
@@ -27,6 +13,20 @@
       .map((c) => (c instanceof Node ? c : String(c)));
     if (replace) n.replaceChildren(...list); else n.append(...list);
     return n;
+  }
+
+  function el(tag, props, ...kids) {
+    const n = document.createElement(tag);
+    if (props) {
+      for (const [k, v] of Object.entries(props)) {
+        if (v == null || v === false) continue;
+        if (k === 'class') n.className = v;
+        else if (k === 'style') n.style.cssText = v;
+        else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+        else n.setAttribute(k, v === true ? '' : String(v));
+      }
+    }
+    return fill(n, kids, false);
   }
 
   // ---------- configuration ----------
@@ -37,43 +37,72 @@
   const RESULTS_REAL = '/shared/results/results.json';
   const RESULTS_EXAMPLE = '/shared/fixtures/results_example.json';
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const EASE = 'cubic-bezier(0.2, 0, 0, 1)';
   document.body.classList.add(LIVE ? 'live' : 'replay');
 
   const SINGLE_MODES = new Set(['single_agent', 'compromised']);
   const UNIT_SUFFIX = { percent: '%', multiple: 'x' };
+  // Moment timings (ms after the attempt row arrives). DESIGN.md section 5.
+  const T = { blockRed: 400, blockStamp: 650, leakFlash: 400, leakStamp: 800, typeMax: 350 };
 
   // ---------- state ----------
   let S;
   let walkTimers = [];
+  let fxTimers = [];
   let results = null;
   let resultsSource = null;
 
   function freshState() {
     return {
-      sessions: {},          // session_id -> {rows: [entry], secrets: [], canary, mode, source}
-      current: null,         // session of the latest run_started
-      ledgerSession: null,   // session whose ledger is on screen
-      lastDone: null,        // session of the latest run_done (target for Verify / Tamper / Bundle)
-      mode: null,
-      source: null,
-      uiMode: 'dt',          // 'single' | 'dt'
-      memo: '',
+      sessions: {},      // session_id -> see session()
+      current: null,     // session of the latest run_started
+      view: null,        // session whose ledger, answer and counters are on screen
+      lastDone: null,    // session of the latest run_done (target for Verify / Tamper / Bundle)
+      uiMode: 'dt',      // 'single' | 'dt'
       fakeDest: null,
-      leaks: 0, blocked: 0, credits: 0, seconds: null,
-      answer: null,
       beat: null,
       proofOpen: false,
     };
   }
 
   function session(sid) {
-    if (!S.sessions[sid]) S.sessions[sid] = { rows: [], secrets: [], canary: null, mode: null, source: null };
+    if (!S.sessions[sid]) {
+      S.sessions[sid] = {
+        rows: [], secrets: [], canary: null, mode: null, source: null, careless: false,
+        memo: '', title: '', sha: '', answer: null, done: null,
+        m: { leaks: 0, blocked: 0, credits: 0, seconds: null },
+      };
+    }
     return S.sessions[sid];
+  }
+
+  const animOK = (o) => !(o && o.instant) && !reduceMotion.matches;
+
+  // Screenshot QA hook (?at=<ms>&freeze=<ms>): play the next moment, then hold every animation at <freeze> ms.
+  let FREEZE = null;
+
+  function later(fn, ms) {
+    if (FREEZE != null) { if (ms <= FREEZE) fn(); return; }
+    fxTimers.push(setTimeout(fn, ms));
+  }
+  function clearFx() {
+    fxTimers.forEach(clearTimeout);
+    fxTimers = [];
+    $('#fx').replaceChildren();
   }
 
   // ---------- helpers ----------
   const shortHash = (h) => (h ? `${h.slice(0, 4)}…${h.slice(-4)}` : '');
   const pad2 = (n) => String(n).padStart(2, '0');
+
+  function shortDest(d) {
+    if (!d) return '';
+    if (d === 'api.tavily.com') return 'tavily';
+    if (d === 'api.anthropic.com') return 'anthropic';
+    const m = /^127\.0\.0\.1:(\d+)$/.exec(d);
+    if (m) return `fake:${m[1]}`;
+    return d;
+  }
 
   function fmtValue(v, unit) {
     const s = String(v);
@@ -89,17 +118,21 @@
   }
 
   // Split text into plain and matched segments. terms: [{text, label}], longest first, non-overlapping.
-  function splitTerms(text, terms) {
+  // ci = case-insensitive (used for redaction, so "PROJECT HALYARD" is hidden like "Project Halyard").
+  function splitTerms(text, terms, ci = false) {
     const list = terms.filter((t) => t.text).sort((a, b) => b.text.length - a.text.length);
+    const hay = ci ? text.toLowerCase() : text;
+    const needles = list.map((t) => (ci ? t.text.toLowerCase() : t.text));
     const out = [];
     let buf = '';
     let i = 0;
     while (i < text.length) {
-      const hit = list.find((t) => text.startsWith(t.text, i));
-      if (hit) {
+      const k = needles.findIndex((nd) => hay.startsWith(nd, i));
+      if (k >= 0) {
         if (buf) { out.push({ text: buf }); buf = ''; }
-        out.push({ text: hit.text, term: hit });
-        i += hit.text.length;
+        const len = needles[k].length;
+        out.push({ text: text.slice(i, i + len), term: list[k] });
+        i += len;
       } else {
         buf += text[i];
         i += 1;
@@ -109,14 +142,19 @@
     return out;
   }
 
-  function secretTerms(sid) {
-    const s = S.sessions[sid];
-    return s ? s.secrets : [];
+  function waiting(text) {
+    return el('p', { class: 'empty waiting' }, `> ${text}`, el('span', { class: 'cursor', 'aria-hidden': 'true' }));
   }
 
-  function highlightSecrets(text, sid) {
-    return splitTerms(text, secretTerms(sid)).map((seg) =>
-      seg.term ? el('mark', { class: 'secret', title: `confirmed secret: ${seg.term.label}` }, seg.text) : seg.text);
+  // Scroll a container so that `node` is visible, without scrolling any ancestor.
+  function scrollWithin(container, node, where = 'nearest') {
+    if (!container || !node) return;
+    const c = container.getBoundingClientRect();
+    const r = node.getBoundingClientRect();
+    if (where === 'center') container.scrollTop += r.top - c.top - (c.height - r.height) / 2;
+    else if (where === 'start') container.scrollTop += r.top - c.top - 8;
+    else if (r.bottom > c.bottom) container.scrollTop += r.bottom - c.bottom + 8;
+    else if (r.top < c.top) container.scrollTop += r.top - c.top - 8;
   }
 
   let toastTimer = null;
@@ -126,6 +164,20 @@
     t.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+  }
+
+  // ---------- title screen ----------
+  function showTitle() { $('#title').classList.add('show'); }
+  function hideTitle() { $('#title').classList.remove('show'); }
+  const titleShown = () => $('#title').classList.contains('show');
+
+  // ---------- the eye ----------
+  function setEye(open, red) {
+    const eye = $('#eye');
+    eye.classList.toggle('closed', !open);
+    if (red != null) eye.classList.toggle('red', !!red);
+    const st = !open ? 'closed: nothing can leave' : eye.classList.contains('red') ? 'open: a secret leaked' : 'open: one agent sees everything';
+    $('#eye-state').textContent = `Eye ${st}`;
   }
 
   // ---------- layout and header ----------
@@ -139,56 +191,105 @@
     $('#source').disabled = m === 'single';
     $('#careless').disabled = m === 'single';
     if (m === 'single') $('#source').value = 'fake';
+    setEye(m === 'single');
     renderGateHead();
   }
 
   function renderBadge() {
     const b = $('#badge');
-    if (S.source === 'real') b.textContent = 'SOURCE: api.tavily.com (real)';
-    else if (S.source === 'fake') b.textContent = 'SOURCE: LOCAL STAND-IN (fake)';
+    const s = S.view && S.sessions[S.view];
+    if (s && s.source === 'real') b.textContent = 'SOURCE: api.tavily.com (real)';
+    else if (s && s.source === 'fake') b.textContent = 'SOURCE: LOCAL STAND-IN (fake)';
     else b.textContent = 'SOURCE: —';
     b.title = b.textContent;
   }
 
+  function runDescription(sid) {
+    const s = S.sessions[sid];
+    if (!s) return sid;
+    const bits = [sid, s.mode, s.source];
+    if (s.careless) bits.push('careless query');
+    if (s.done) bits.push(s.done.outcome);
+    return bits.filter(Boolean).join(' · ');
+  }
+
   function renderGateHead() {
     const single = S.uiMode === 'single';
+    const s = S.view && S.sessions[S.view];
     $('#gate-title').textContent = single ? 'Outbound' : 'The gate';
-    let sub = 'only door out';
+    let sub = 'the only way out';
     if (single) sub = 'recorded, not enforced';
-    else if (S.mode === 'two_minds') sub = 'recording only · not enforcing';
+    else if (s && s.mode === 'two_minds') sub = 'recording only · not enforcing';
     $('#gate-sub').textContent = sub;
 
     const exit = $('#exit');
-    exit.replaceChildren(el('span', { class: 'door' }, 'EXIT ▲'));
+    exit.replaceChildren(el('span', { class: 'door' }, single ? 'EXIT ▲' : 'ONLY DOOR OUT ▲'));
     const dests = [];
-    if (S.source === 'real') dests.push('api.tavily.com');
-    else if (S.source === 'fake') dests.push(S.fakeDest || '127.0.0.1 (local stand-in)');
+    if (s && s.source === 'real') dests.push('api.tavily.com');
+    else if (s && s.source === 'fake') dests.push(S.fakeDest || '127.0.0.1 (local stand-in)');
     dests.push('api.anthropic.com (reader only)');
     for (const d of dests) exit.append(el('span', { class: 'dest' }, d));
 
-    const sid = S.ledgerSession;
-    const mode = sid && S.sessions[sid] ? S.sessions[sid].mode : null;
-    $('#ledger-session').textContent = sid ? `ledger ${sid}${mode ? ` · ${mode}` : ''}` : '';
+    // When the ledger shows an earlier run than the latest one (the proof beats), say so loudly.
+    const other = S.view && S.view !== S.current;
+    $('#run-label').textContent = other ? `VERIFYING RUN ${runDescription(S.view)}` : '';
+    $('#ledger-session').textContent = S.view && !other ? `ledger ${S.view}${s && s.mode ? ` · ${s.mode}` : ''}` : '';
   }
 
-  function renderMetrics() {
-    const set = (id, v, hot) => {
-      const n = $(id);
-      n.querySelector('dd').textContent = v;
-      n.classList.toggle('hot', !!hot);
-    };
-    set('#m-leaks', S.leaks, S.leaks > 0);
-    set('#m-blocked', S.blocked, S.blocked > 0);
-    set('#m-credits', S.credits, false);
-    set('#m-seconds', S.seconds == null ? '— s' : `${S.seconds} s`, false);
+  // ---------- big counters (M11) ----------
+  function setCounter(id, value, animate) {
+    const box = $(id);
+    const dd = box.querySelector('dd');
+    const nums = dd.querySelectorAll('.num');
+    const old = nums[nums.length - 1];
+    const text = String(value);
+    if (old && old.textContent === text) return;
+    if (!animate || !old || reduceMotion.matches) {
+      dd.replaceChildren(el('span', { class: 'num' }, text));
+      return;
+    }
+    const fresh = el('span', { class: 'num' }, text);
+    dd.append(fresh);
+    old.animate([{ transform: 'translateY(0)', opacity: 1 }, { transform: 'translateY(-100%)', opacity: 0 }],
+      { duration: 200, easing: EASE, fill: 'forwards' }).finished.then(() => old.remove(), () => {});
+    fresh.animate([{ transform: 'translateY(100%)', opacity: 0 }, { transform: 'translateY(0)', opacity: 1 }],
+      { duration: 200, easing: EASE, fill: 'backwards' });
   }
 
-  function setEmptyHints() {
-    const msg = LIVE ? 'Waiting for a run. Press Run.' : 'Waiting for a run. Press Space to play the replay.';
-    document.querySelectorAll('[data-empty]').forEach((n) => { n.textContent = msg; });
+  function renderCounters(sid, animate) {
+    if (sid !== S.view) return;
+    const m = sid && S.sessions[sid] ? S.sessions[sid].m : { leaks: 0, blocked: 0, credits: 0, seconds: null };
+    setCounter('#m-leaks', m.leaks, animate);
+    setCounter('#m-blocked', m.blocked, animate);
+    setCounter('#m-credits', m.credits, animate);
+    setCounter('#m-seconds', m.seconds == null ? '—' : `${m.seconds} s`, false);
+    $('#m-leaks').classList.toggle('hot', m.leaks > 0);
+    $('#m-blocked').classList.toggle('hot', m.blocked > 0);
   }
 
-  // ---------- memo ----------
+  // ---------- answer bar ----------
+  function renderAnswerBar(sid) {
+    if (sid !== S.view) return;
+    const s = sid ? S.sessions[sid] : null;
+    const t = $('#answer-text');
+    t.classList.remove('bad');
+    $('#answer-bar').disabled = !(s && s.answer);
+    if (s && s.answer) t.textContent = s.answer.text || '';
+    else if (s && s.done) {
+      t.textContent = `No answer. Run ended: ${s.done.outcome}.`;
+      t.classList.toggle('bad', s.done.outcome === 'leaked' || s.done.outcome === 'blocked');
+    } else t.textContent = '—';
+  }
+
+  // Everything that describes one run follows the ledger: answer bar, counters, badge, gate header.
+  function showRunSummary(sid, animate = false) {
+    renderAnswerBar(sid);
+    renderCounters(sid, animate);
+    renderBadge();
+    renderGateHead();
+  }
+
+  // ---------- dossier memo ----------
   function memoTerms(sid) {
     const s = session(sid);
     const terms = [...s.secrets];
@@ -196,47 +297,84 @@
     return terms;
   }
 
+  function redacted(text, sid) {
+    return splitTerms(text, memoTerms(sid), true).map((seg) => (seg.term
+      ? el('button', { type: 'button', class: 'redact', 'data-label': seg.term.label, 'aria-label': `hidden: ${seg.term.label}` }, seg.text)
+      : seg.text));
+  }
+
+  function dossier(sid, redact) {
+    const s = session(sid);
+    const subject = s.title || '—';
+    return [
+      el('p', { class: 'dossier-head' }, '> FILE 1984 · SUBJECT: ', redact ? redacted(subject, sid) : subject,
+        s.sha ? ` · sha ${shortHash(s.sha)}` : ''),
+      el('div', { class: 'confidential', 'aria-label': 'confidential' }, 'CONFIDENTIAL'),
+      el('div', { class: 'memo' }, redact ? redacted(s.memo, sid) : s.memo),
+    ];
+  }
+
   function renderMemo() {
     const sid = S.current;
-    if (!sid || !S.memo) return;
-    const segs = splitTerms(S.memo, memoTerms(sid));
-    // Planner room: secrets as redaction bars, revealed on hover or focus.
-    $('#memo').replaceChildren(...segs.map((seg) => (seg.term
-      ? el('button', { type: 'button', class: 'redact', 'data-label': seg.term.label, 'aria-label': `hidden: ${seg.term.label}` }, seg.text)
-      : seg.text)));
-    // One agent room: the single agent has the memo in the clear.
-    $('#agent-memo').replaceChildren(S.memo);
+    if (!sid || !session(sid).memo) return;
+    fill($('#dossier'), dossier(sid, true));
+    fill($('#agent-dossier'), dossier(sid, false));   // the single agent holds the memo in the clear
   }
 
   // ---------- ledger ----------
+  function typedQuery(text, sid, animate, flash) {
+    const secrets = S.sessions[sid] ? S.sessions[sid].secrets : [];
+    const segs = splitTerms(text, secrets);
+    if (!animate) {
+      return segs.map((seg) => (seg.term ? el('mark', { class: 'secret', title: `confirmed secret: ${seg.term.label}` }, seg.text) : seg.text));
+    }
+    let i = 0;
+    const chars = (s) => [...s].map((c) => el('span', { class: 'ch', style: `--i:${i++}` }, c));
+    return segs.map((seg) => (seg.term
+      ? el('mark', { class: `secret${flash ? ' flash' : ''}`, title: `confirmed secret: ${seg.term.label}`, style: `--i:${i}` }, chars(seg.text))
+      : chars(seg.text)));
+  }
+
+  function rowKind(row) {
+    if (row.row_type !== 'attempt') return 'result';
+    if (row.decision === 'blocked') return 'blocked';
+    return row.rule != null ? 'leak' : 'allowed';
+  }
+
   function rowNode(entry, sid, animate) {
     const { row, display } = entry;
-    const isAttempt = row.row_type === 'attempt';
-    const li = el('li', { class: `row ${isAttempt ? 'attempt' : 'result'}`, 'data-seq': row.seq });
-    if (animate) li.classList.add('enter');
+    const kind = rowKind(row);
+    const li = el('li', { class: `row ${kind === 'result' ? 'result' : 'attempt'}`, 'data-seq': row.seq });
+    if (animate) {
+      li.classList.add('enter');
+      if (kind === 'blocked') li.style.cssText = `--red-at:${T.blockRed}ms;--stamp-at:${T.blockStamp}ms`;
+      else if (kind === 'leak') li.style.cssText = `--red-at:${T.leakStamp}ms;--stamp-at:${T.leakStamp}ms`;
+    }
 
-    if (isAttempt) {
-      const blocked = row.decision === 'blocked';
-      const leak = row.decision === 'allowed' && row.rule != null;
-      if (blocked) li.classList.add('blocked');
-      if (leak) li.classList.add('leak');
-      const mark = blocked
+    if (kind !== 'result') {
+      if (kind === 'blocked') li.classList.add('blocked');
+      if (kind === 'leak') li.classList.add('leak');
+      const mark = kind === 'blocked'
         ? el('span', { class: 'mark bad' }, '✕ BLOCKED')
-        : leak ? el('span', { class: 'mark bad' }, '✕ LEAKED') : el('span', { class: 'mark ok', 'aria-label': 'allowed' }, '✓');
+        : kind === 'leak' ? el('span', { class: 'mark bad' }, '✕ LEAKED') : el('span', { class: 'mark ok', 'aria-label': 'allowed' }, '✓');
       li.append(el('div', { class: 'line1' },
         el('span', { class: 'pslot', 'aria-hidden': 'true' }),
         el('span', { class: 'seq' }, pad2(row.seq)),
         el('span', { class: 'kind' }, row.kind),
-        el('span', { class: 'dest', title: row.destination }, row.destination),
+        el('span', { class: 'dest', title: row.destination }, shortDest(row.destination)),
         el('span', { class: 'hash', title: row.hash }, shortHash(row.hash)),
         mark));
       const d = display || {};
-      if (d.query) li.append(el('div', { class: 'q' }, '"', el('span', { class: 'quote' }, highlightSecrets(d.query, sid)), '"'));
-      else if (d.summary || d.label) li.append(el('div', { class: 'q' }, d.summary || d.label));
+      if (d.query) {
+        const n = [...d.query].length;
+        const q = el('div', { class: `q indent${animate ? ' typing' : ''}` }, '"', el('span', null, typedQuery(d.query, sid, animate, kind === 'leak')), '"');
+        if (animate) q.style.setProperty('--step', `${Math.min(25, T.typeMax / Math.max(1, n)).toFixed(2)}ms`);
+        li.append(q);
+      } else if (d.summary || d.label) li.append(el('div', { class: 'q indent' }, d.summary || d.label));
       const detail = (entry.blockedInfo && entry.blockedInfo.detail) || d.detail;
-      if (row.rule) li.append(el('div', { class: 'rule' }, `rule ${row.rule}`, detail ? el('span', { class: 'detail' }, ` · ${detail}`) : null));
-      if (blocked || leak) li.append(el('div', null, el('span', { class: 'stamp' }, blocked ? 'BLOCKED' : 'LEAKED')));
-      if (entry.blockedInfo && entry.blockedInfo.planted) li.append(el('div', { class: 'q' }, el('span', { class: 'tag' }, 'planted test query')));
+      if (row.rule) li.append(el('div', { class: 'rule indent' }, `rule ${row.rule}`, detail ? el('span', { class: 'detail' }, ` · ${detail}`) : null));
+      if (kind === 'blocked' || kind === 'leak') li.append(el('div', { class: 'indent' }, el('span', { class: 'stamp' }, kind === 'blocked' ? 'BLOCKED' : 'LEAKED')));
+      if (entry.blockedInfo && entry.blockedInfo.planted) li.append(plantedTag());
     } else {
       const bits = [row.status === 'sent' ? String(row.http_status ?? '') : row.status];
       if (row.credits_used != null) bits.push(`${row.credits_used} credit${row.credits_used === 1 ? '' : 's'}`);
@@ -249,19 +387,87 @@
     return li;
   }
 
+  const plantedTag = () => el('div', { class: 'indent' }, el('span', { class: 'tag' }, 'planted test query'));
+
   function scrollLedger() {
     const sc = $('#ledger-scroll');
     sc.scrollTop = sc.scrollHeight;
   }
 
   function renderLedger(sid) {
-    S.ledgerSession = sid;
+    S.view = sid;
     const s = S.sessions[sid];
     const nodes = s ? s.rows.map((e) => rowNode(e, sid, false)) : [];
-    $('#ledger').replaceChildren(...nodes);
+    fill($('#ledger'), nodes);
     $('#ledger-empty').hidden = nodes.length > 0;
-    renderGateHead();
+    showRunSummary(sid, false);
     scrollLedger();
+  }
+
+  // ---------- packets (M1, M2, M3, M5) ----------
+  function sourceRoom(component) {
+    if (component === 'reader') return { node: $('#reader'), side: 'right' };
+    if (S.uiMode === 'single') return { node: $('#agent'), side: 'left' };
+    return { node: $('#planner'), side: 'left' };
+  }
+
+  function launchPacket(li, row, kind) {
+    const { node: room, side } = sourceRoom(row.component);
+    const gate = $('#gate').getBoundingClientRect();
+    const exit = $('#exit').getBoundingClientRect();
+    const rr = room && room.offsetParent ? room.getBoundingClientRect() : null;
+    const lr = li.getBoundingClientRect();
+    const y0 = Math.min(Math.max(lr.top + 10, gate.top + 40), gate.bottom - 30);
+    const x0 = rr ? (side === 'left' ? rr.right - 40 : rr.left + 28) : (side === 'left' ? gate.left - 40 : gate.right + 28);
+    const xIn = side === 'left' ? gate.left + 18 : gate.right - 30;
+    const xMid = gate.left + gate.width / 2 - 6;
+    const yStop = exit.bottom + 6;
+    const yOut = exit.top - 36;
+    const at = (x, y) => `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+
+    const red = el('span', { class: 'pk-red' });
+    const p = el('div', { class: 'packet' }, red);
+    $('#fx').append(p);
+
+    let frames;
+    let duration;
+    if (kind === 'blocked') {
+      // Slide in, rise, stop under the door, shake, fade where it stopped.
+      duration = 850;
+      const o = (ms) => ms / duration;
+      frames = [
+        { transform: at(x0, y0), opacity: 1, offset: 0, easing: EASE },
+        { transform: at(xIn, y0), opacity: 1, offset: o(200), easing: EASE },
+        { transform: at(xMid, yStop), opacity: 1, offset: o(400), easing: EASE },
+        { transform: at(xMid - 8, yStop), offset: o(440), easing: EASE },
+        { transform: at(xMid + 8, yStop), offset: o(480), easing: EASE },
+        { transform: at(xMid - 6, yStop), offset: o(525), easing: EASE },
+        { transform: at(xMid + 6, yStop), offset: o(565), easing: EASE },
+        { transform: at(xMid - 3, yStop), offset: o(610), easing: EASE },
+        { transform: at(xMid, yStop), opacity: 1, offset: o(650), easing: EASE },
+        { transform: at(xMid, yStop), opacity: 0, offset: 1 },
+      ];
+      red.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, delay: 400, easing: EASE, fill: 'both' });
+    } else {
+      // Slide in, rise through the door and leave.
+      duration = 600;
+      const o = (ms) => ms / duration;
+      frames = [
+        { transform: at(x0, y0), opacity: 1, offset: 0, easing: EASE },
+        { transform: at(xIn, y0), opacity: 1, offset: o(200), easing: EASE },
+        { transform: at(xMid, exit.top + 4), opacity: 1, offset: o(400), easing: EASE },
+        { transform: at(xMid, yOut), opacity: 0, offset: 1 },
+      ];
+      if (kind === 'leak') red.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, delay: 300, easing: EASE, fill: 'both' });
+    }
+    p.animate(frames, { duration, fill: 'both' }).finished.then(() => p.remove(), () => p.remove());
+  }
+
+  function flashExit() {
+    const exit = $('#exit');
+    exit.classList.remove('flash');
+    void exit.offsetWidth;   // restart the CSS animation
+    exit.classList.add('flash');
   }
 
   // ---------- reader room and web ----------
@@ -282,12 +488,15 @@
   function jobNode(d, animate) {
     const body = el('div', { class: 'job-body' }, (d.docs || []).map((doc) => docNode(doc, animate)), el('div', { class: 'claims' }));
     const job = el('section', { class: 'job', 'data-job': d.job || '' });
-    const head = el('button', { type: 'button', class: 'job-head', 'aria-expanded': 'true',
+    const head = el('button', {
+      type: 'button',
+      class: 'job-head',
+      'aria-expanded': 'true',
       onclick: () => {
         const c = job.classList.toggle('collapsed');
         head.setAttribute('aria-expanded', String(!c));
-      } },
-    `${d.job || 'web'} · query `, el('span', { class: 'pq' }, `"${d.public_query}"`),
+      },
+    }, `${d.job || 'web'} · query `, el('span', { class: 'pq' }, `"${d.public_query}"`),
     el('span', { class: 'job-summary' }, ` · ${(d.docs || []).length} documents read`));
     job.append(head, body);
     return job;
@@ -313,31 +522,32 @@
 
   function renderProofStatic(sid) {
     $('#proof-session').textContent = sid ? `session ${sid}` : 'no session yet';
+    $('#proof-run').textContent = sid ? `VERIFYING RUN ${runDescription(sid)}` : '';
     $('#proof-cmd').textContent = `python3 proof/verify.py bundles/${sid || '<session_id>'}.json`;
   }
 
   function showVerdict(d, animate) {
     const slot = $('#verdict');
     if (d.valid) {
-      slot.replaceChildren(el('div', { class: `verdict valid${animate ? ' fade' : ''}` }, 'VALID'),
-        el('p', { class: 'verdict-why' }, `${d.rows_checked} rows checked`));
+      fill(slot, [el('div', { class: `verdict valid${animate ? ' fade' : ''}` }, 'VALID'),
+        el('p', { class: 'verdict-why' }, `${d.rows_checked} rows checked`)]);
     } else {
-      slot.replaceChildren(el('div', { class: `verdict invalid${animate ? ' fade' : ''}` }, 'INVALID'),
-        el('p', { class: 'verdict-why bad' }, `row ${d.broken_at_seq} · ${d.reason}`));
+      fill(slot, [el('div', { class: `verdict invalid${animate ? ' fade' : ''}` }, 'INVALID'),
+        el('p', { class: 'verdict-why bad' }, `row ${d.broken_at_seq} · ${d.reason}`)]);
     }
   }
 
   function walkProof(d, animate) {
     clearWalk();
+    const sc = $('#ledger-scroll');
     const rows = [...document.querySelectorAll('#ledger li.row')]
       .sort((a, b) => Number(a.dataset.seq) - Number(b.dataset.seq));
     rows.forEach((li) => {
       li.classList.remove('p-ok', 'broken', 'tampered');
       li.querySelector('.pslot').textContent = '';
-      const t = li.querySelector('.tampered-tag');
-      if (t) t.parentNode.remove();
+      li.querySelectorAll('.tampered-tag').forEach((t) => t.parentNode.remove());
     });
-    $('#verdict').replaceChildren(el('p', { class: 'empty' }, 'Checking the chain…'));
+    fill($('#verdict'), waiting('checking the chain'));
 
     const broken = d.valid ? null : d.broken_at_seq;
     const good = rows.filter((li) => (broken == null ? Number(li.dataset.seq) <= d.rows_checked : Number(li.dataset.seq) < broken));
@@ -354,21 +564,22 @@
       li.querySelector('.pslot').textContent = '✕';
       if (d.tampered && Number(li.dataset.seq) === d.tampered_seq) {
         li.classList.add('tampered');
-        li.append(el('div', { class: 'q' }, el('span', { class: 'tag tampered-tag' }, '1 byte edited')));
+        li.append(el('div', { class: 'indent' }, el('span', { class: 'tag tampered-tag' }, '1 byte edited')));
       }
     };
 
     if (!animate) {
       good.forEach(markGood);
       bad.forEach(markBad);
+      if (bad.length) scrollWithin(sc, bad[0], 'start');
       showVerdict(d, false);
       return;
     }
     const step = good.length ? Math.min(80, 1200 / good.length) : 0;
-    good.forEach((li, i) => walkTimers.push(setTimeout(() => { markGood(li); li.scrollIntoView({ block: 'nearest' }); }, i * step)));
+    good.forEach((li, i) => walkTimers.push(setTimeout(() => { markGood(li); scrollWithin(sc, li); }, i * step)));
     let t = good.length * step;
     const badStep = bad.length ? Math.min(40, 600 / bad.length) : 0;
-    bad.forEach((li, i) => walkTimers.push(setTimeout(() => { markBad(li); if (i === 0) li.scrollIntoView({ block: 'nearest' }); }, t + i * badStep)));
+    bad.forEach((li, i) => walkTimers.push(setTimeout(() => { markBad(li); if (i === 0) scrollWithin(sc, li, 'start'); }, t + i * badStep)));
     t += bad.length * badStep;
     walkTimers.push(setTimeout(() => showVerdict(d, true), t));
   }
@@ -376,7 +587,8 @@
   // ---------- answer sheet ----------
   function renderSheet() {
     const sheet = $('#sheet');
-    const a = S.answer;
+    const s = S.view && S.sessions[S.view];
+    const a = s && s.answer;
     if (!a) { sheet.replaceChildren(); return; }
     const needs = (a.needs || []).map((n) => {
       const h = n.headline;
@@ -402,7 +614,8 @@
   function toggleSheet(force) {
     const sheet = $('#sheet');
     const open = force ?? !sheet.classList.contains('open');
-    if (open && !S.answer) { toast('No answer yet.'); return; }
+    const s = S.view && S.sessions[S.view];
+    if (open && !(s && s.answer)) { toast('No answer yet.'); return; }
     if (open) renderSheet();
     sheet.classList.toggle('open', open);
     if (open) sheet.querySelector('button').focus();
@@ -433,8 +646,8 @@
   function renderResults() {
     const box = $('#results');
     if (!results || !Array.isArray(results.runs) || results.runs.length === 0) {
-      box.replaceChildren(el('h2', { id: 'results-title', class: 'results-title' }, 'Results file not found.'),
-        el('p', { class: 'smallprint' }, `Tried ${RESULTS_REAL} and ${RESULTS_EXAMPLE}.`));
+      fill(box, [el('h2', { id: 'results-title', class: 'results-title' }, 'Results file not found.'),
+        el('p', { class: 'smallprint' }, `Tried ${RESULTS_REAL} and ${RESULTS_EXAMPLE}.`)]);
       return;
     }
     const runs = results.runs;
@@ -451,13 +664,13 @@
       const m = (run.modes || {})[key];
       const track = el('div', { class: 'track', 'aria-hidden': 'true' });
       if (m && m.runs) {
-        const fill = el('div', { class: 'fill' });
-        fill.style.width = `${(100 * m.leaked) / m.runs}%`;
-        track.append(fill);
-        const f = frozen && (frozen.modes || {})[key];
-        if (f && f.runs) {
+        const f = el('div', { class: 'fill' });
+        f.style.width = `${(100 * m.leaked) / m.runs}%`;
+        track.append(f);
+        const fr = frozen && (frozen.modes || {})[key];
+        if (fr && fr.runs) {
           const tick = el('div', { class: 'tick' });
-          tick.style.left = `${(100 * f.leaked) / f.runs}%`;
+          tick.style.left = `${(100 * fr.leaked) / fr.runs}%`;
           track.append(tick);
         }
       }
@@ -480,11 +693,9 @@
       fb ? el('p', { class: 'fb' }, 'False blocks on normal questions: ',
         el('span', { class: fb.blocked > 0 ? 'bad' : '' }, `${fb.blocked} / ${fb.total}`),
         byRule ? el('span', { class: 'smallprint' }, `  ${byRule}`) : null) : null,
-      el('p', { class: 'smallprint' },
-        `run ${run.label} · commit ${run.commit} · planner ${run.planner_model} · source ${run.source}`),
+      el('p', { class: 'smallprint' }, `run ${run.label} · commit ${run.commit} · planner ${run.planner_model} · source ${run.source}`),
       u ? el('p', { class: 'smallprint' }, `answered with a cited number ${u.answered_with_cited_number} / ${u.total}`) : null,
-      el('p', { class: 'smallprint' },
-        `Tavily credits per question ${nm(c.tavily_credits_per_question)} · seconds per question ${nm(c.seconds_per_question)}`),
+      el('p', { class: 'smallprint' }, `Tavily credits per question ${nm(c.tavily_credits_per_question)} · seconds per question ${nm(c.seconds_per_question)}`),
       el('p', { class: 'smallprint' }, `from ${resultsSource}`)]);
   }
 
@@ -495,45 +706,45 @@
     box.classList.toggle('open', open);
   }
 
+  // ---------- empty rooms ----------
+  function setEmptyRooms() {
+    fill($('#dossier'), waiting('waiting for the memo'));
+    fill($('#agent-dossier'), waiting('waiting for the memo'));
+    fill($('#typed'), el('li', null, waiting('no numbers yet')));
+    fill($('#agent-web'), waiting('waiting for web text'));
+    fill($('#reader-body'), waiting('waiting for web text'));
+    $('#ledger').replaceChildren();
+    $('#ledger-empty').hidden = false;
+  }
+
   // ---------- dispatcher ----------
   const handlers = {
     run_started(env) {
       const d = env.data;
       const sid = env.session_id;
       const s = session(sid);
-      s.rows = [];
-      s.mode = d.mode;
-      s.source = d.source;
+      Object.assign(s, { rows: [], mode: d.mode, source: d.source, careless: !!d.plant_careless, answer: null, done: null,
+        m: { leaks: 0, blocked: 0, credits: 0, seconds: null } });
       S.current = sid;
-      S.mode = d.mode;
-      S.source = d.source;
       S.fakeDest = null;
-      S.memo = '';
-      S.leaks = 0; S.blocked = 0; S.credits = 0; S.seconds = null;
-      S.answer = null;
       clearWalk();
-      $('#memo').replaceChildren();
-      $('#agent-memo').replaceChildren();
-      $('#typed').replaceChildren();
-      $('#agent-web').replaceChildren();
-      $('#reader-body').replaceChildren(el('p', { class: 'empty' }, 'No web text yet.'));
-      $('#answer-text').textContent = '—';
-      $('#answer-text').classList.remove('bad');
-      $('#answer-bar').disabled = true;
+      clearFx();
+      if (LIVE) hideTitle();
+      setProofOpen(false);
+      setEmptyRooms();
       $('#sheet').classList.remove('open');
       setUiMode(SINGLE_MODES.has(d.mode) ? 'single' : 'dt');
-      renderBadge();
-      renderLedger(sid);   // clears the ledger panel
-      renderMetrics();
+      setEye(!$('#eye').classList.contains('closed'), false);
+      renderLedger(sid);   // clears the ledger panel and shows this run's (empty) answer and counters
     },
 
     memo_loaded(env) {
       const s = session(env.session_id);
       s.canary = env.data.canary || null;
-      if (env.session_id === S.current) {
-        S.memo = env.data.text || '';
-        renderMemo();
-      }
+      s.memo = env.data.text || '';
+      s.title = env.data.title || '';
+      s.sha = env.data.sha256 || '';
+      if (env.session_id === S.current) renderMemo();
     },
 
     parties_confirmed(env) {
@@ -547,26 +758,38 @@
 
     ledger_row(env, o) {
       const sid = env.session_id;
+      const s = session(sid);
       const entry = { row: env.data.row, display: env.data.display, credits: env.data.credits_used, blockedInfo: null };
-      session(sid).rows.push(entry);
+      s.rows.push(entry);
       const row = entry.row;
-      if (sid === S.current) {
-        if (row.row_type === 'attempt') {
-          if (row.decision === 'blocked') S.blocked += 1;
-          else if (row.rule != null) S.leaks += 1;
-        }
-        if (typeof entry.credits === 'number') S.credits += entry.credits;
-        if (row.destination && row.destination.startsWith('127.0.0.1') && S.fakeDest !== row.destination) {
-          S.fakeDest = row.destination;
-          renderGateHead();
-        }
-        renderMetrics();
+      const kind = rowKind(row);
+      if (kind === 'blocked') s.m.blocked += 1;
+      if (kind === 'leak') s.m.leaks += 1;
+      if (typeof entry.credits === 'number') s.m.credits += entry.credits;
+      if (sid === S.current && row.destination && row.destination.startsWith('127.0.0.1') && S.fakeDest !== row.destination) {
+        S.fakeDest = row.destination;
+        renderGateHead();
       }
-      if (sid === S.ledgerSession) {
-        $('#ledger').append(rowNode(entry, sid, !o.instant));
-        $('#ledger-empty').hidden = true;
-        scrollLedger();
-      }
+      if (sid !== S.view) return;
+
+      const animate = animOK(o);
+      const li = rowNode(entry, sid, !(o && o.instant));
+      $('#ledger').append(li);
+      $('#ledger-empty').hidden = true;
+      scrollLedger();
+
+      // The moment: packet, red wall flash, stamp, counter tick, eye. None of it delays the replay.
+      if (animate && kind !== 'result') launchPacket(li, row, kind);
+      if (kind === 'blocked') {
+        if (animate) {
+          later(flashExit, 0);
+          later(() => renderCounters(sid, true), T.blockStamp);
+        } else renderCounters(sid, false);
+      } else if (kind === 'leak') {
+        if (animate) {
+          later(() => { renderCounters(sid, true); setEye(true, true); }, T.leakStamp);
+        } else { renderCounters(sid, false); setEye(true, true); }
+      } else renderCounters(sid, animate);
     },
 
     blocked(env, o) {
@@ -575,24 +798,28 @@
       const entry = s.rows.find((e) => e.row.row_type === 'attempt' && e.row.seq === env.data.ledger_seq);
       if (!entry) return;
       entry.blockedInfo = env.data;
-      if (sid === S.ledgerSession) {
-        const old = document.querySelector(`#ledger li.attempt[data-seq="${env.data.ledger_seq}"]`);
-        const fresh = rowNode(entry, sid, !o.instant);
-        if (old) old.replaceWith(fresh); else $('#ledger').append(fresh);
-        scrollLedger();
+      if (sid !== S.view) return;
+      // Update the row in place, so its running animation is not restarted.
+      const li = document.querySelector(`#ledger li.attempt[data-seq="${env.data.ledger_seq}"]`);
+      if (!li) return;
+      if (env.data.detail && !li.querySelector('.rule .detail')) {
+        const r = li.querySelector('.rule');
+        if (r) r.append(el('span', { class: 'detail' }, ` · ${env.data.detail}`));
       }
+      if (env.data.planted && !li.querySelector('.tag')) li.append(plantedTag());
+      if (o && o.instant) scrollLedger();
     },
 
     docs_read(env, o) {
       if (env.session_id !== S.current) return;
       const d = env.data;
       const target = d.by === 'baseline' ? $('#agent-web') : $('#reader-body');
-      target.querySelectorAll('.empty').forEach((n) => n.remove());
+      target.querySelectorAll('.waiting').forEach((n) => n.remove());
       collapseJobs(target);
-      const node = jobNode(d, !o.instant);
+      const node = jobNode(d, !(o && o.instant));
       target.append(node);
       const planted = node.querySelector('mark.planted');
-      (planted || node).scrollIntoView({ block: planted ? 'center' : 'start' });
+      scrollWithin(target, planted || node, planted ? 'center' : 'start');
     },
 
     reader_claims(env) {
@@ -615,31 +842,30 @@
     planner_typed(env, o) {
       if (env.session_id !== S.current) return;
       const d = env.data;
+      const list = $('#typed');
+      list.querySelectorAll('.waiting').forEach((n) => n.closest('li').remove());
       const vals = (d.values || []).map((v) => el('div', { class: 'val' }, `${v.value} ${v.unit}  ${v.period || '—'}  ${v.result_id}`));
-      const li = el('li', { class: o.instant ? '' : 'fade' },
+      const li = el('li', { class: o && o.instant ? '' : 'fade' },
         el('div', { class: 'tneed' }, `${d.need}  ${d.found ? 'found' : 'not found'}`), vals);
-      $('#typed').append(li);
-      li.scrollIntoView({ block: 'nearest' });   // keep the newest typed facts in view under the memo
+      list.append(li);
+      scrollWithin($('#planner-low'), li);
     },
 
     answer(env) {
-      if (env.session_id !== S.current) return;
-      S.answer = env.data;
-      $('#answer-text').textContent = env.data.text || '';
-      $('#answer-bar').disabled = false;
+      const s = session(env.session_id);
+      s.answer = env.data;
+      renderAnswerBar(env.session_id);
     },
 
     run_done(env) {
       const d = env.data;
+      const s = session(env.session_id);
+      s.done = d;
+      s.m = { leaks: d.leaks, blocked: d.blocked, credits: d.credits_total, seconds: d.seconds };
       S.lastDone = env.session_id;
-      if (env.session_id !== S.current) return;
-      S.leaks = d.leaks; S.blocked = d.blocked; S.credits = d.credits_total; S.seconds = d.seconds;
-      renderMetrics();
-      if (!S.answer) {
-        const t = $('#answer-text');
-        t.textContent = `No answer. Run ended: ${d.outcome}.`;
-        t.classList.toggle('bad', d.outcome === 'leaked' || d.outcome === 'blocked');
-      }
+      renderCounters(env.session_id, false);
+      renderAnswerBar(env.session_id);
+      renderGateHead();
       renderProofStatic(S.lastDone);
     },
 
@@ -647,13 +873,14 @@
       const sid = env.session_id;
       const d = env.data;
       setProofOpen(true);
-      if (S.ledgerSession !== sid && S.sessions[sid]) renderLedger(sid);
+      // One story on screen: ledger, answer bar and counters all switch to the verified run.
+      if (S.view !== sid && S.sessions[sid]) renderLedger(sid);
       renderProofStatic(sid);
       $('#proof-head').textContent = shortHash(d.bundle_head);
       $('#proof-head').title = d.bundle_head;
       $('#proof-rows').textContent = String(d.rows_checked);
       if (d.tampered_seq != null) $('#tamper-seq').value = d.tampered_seq;
-      walkProof(d, !o.instant && !reduceMotion.matches);
+      walkProof(d, animOK(o));
     },
 
     beat(env) {
@@ -693,6 +920,7 @@
 
   function play() {
     if (R.i >= R.events.length) restart();
+    hideTitle();
     R.startedAt = performance.now();
     R.playing = true;
     cancelAnimationFrame(R.raf);
@@ -708,27 +936,20 @@
 
   function resetView() {
     clearWalk();
+    clearFx();
     S = freshState();
     setProofOpen(false);
-    $('#ledger').replaceChildren();
-    $('#ledger-empty').hidden = false;
-    $('#memo').replaceChildren(el('p', { class: 'empty', 'data-empty': '' }));
-    $('#agent-memo').replaceChildren(el('p', { class: 'empty', 'data-empty': '' }));
-    $('#typed').replaceChildren();
-    $('#agent-web').replaceChildren();
-    $('#reader-body').replaceChildren(el('p', { class: 'empty' }, 'No web text yet.'));
-    $('#verdict').replaceChildren(el('p', { class: 'empty' }, 'Not verified yet. Press Verify proof.'));
+    setEmptyRooms();
+    fill($('#verdict'), el('p', { class: 'empty' }, 'Not verified yet. Press Verify proof.'));
     $('#proof-head').textContent = '—';
     $('#proof-rows').textContent = '—';
-    $('#answer-text').textContent = '—';
-    $('#answer-bar').disabled = true;
     $('#sheet').classList.remove('open');
+    $('#exit').classList.remove('flash');
     setScreen('main');
     setUiMode('dt');
-    renderBadge();
-    renderMetrics();
+    setEye(false, false);
+    showRunSummary(null, false);
     renderProofStatic(null);
-    setEmptyHints();
   }
 
   function seek(ms) {
@@ -745,9 +966,11 @@
   function restart() {
     pause();
     seek(0);
+    showTitle();
   }
 
   function nextBeat() {
+    hideTitle();
     let j = R.i;
     while (j < R.events.length && R.events[j].type !== 'beat') j += 1;
     if (j >= R.events.length) { toast('Last beat reached. Press R to restart.'); return; }
@@ -764,13 +987,26 @@
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       text = await r.text();
     } catch (e) {
+      hideTitle();
       toast(`Could not load ${FIXTURE}. Serve the repo root: python -m http.server 8703 --bind 127.0.0.1`);
       return;
     }
     R.events = text.split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l)).sort((a, b) => a.seq - b.seq);
     const at = Number(params.get('at'));
-    seek(Number.isFinite(at) && at > 0 ? at : 0);
+    const start = Number.isFinite(at) && at > 0 ? at : 0;
+    seek(start);
+    if (start > 0 || params.get('title') === '0') hideTitle();
     if (params.get('open') === 'answer') toggleSheet(true);
+    if (params.has('freeze')) {
+      // Dispatch the events of the next 100ms with animation, then pin all animations at <freeze> ms.
+      FREEZE = Number(params.get('freeze')) || 0;
+      const until = start + 100;
+      while (R.i < R.events.length && R.events[R.i].t_ms <= until) dispatch(R.events[R.i++], { instant: false });
+      R.base = until;
+      renderReplayStatus();
+      requestAnimationFrame(() => document.getAnimations().forEach((a) => { a.pause(); a.currentTime = FREEZE; }));
+      return;
+    }
     if (params.get('play') === '1') play();
   }
 
@@ -780,6 +1016,7 @@
 
   // ---------- live ----------
   function startLive() {
+    if (params.get('title') === '0') hideTitle();
     const es = new EventSource(`/events?token=${encodeURIComponent(TOKEN)}`);
     es.onopen = () => toast('Live: connected.');
     es.onmessage = (m) => {
@@ -806,7 +1043,8 @@
 
   // ---------- controls ----------
   async function onRun() {
-    if (!LIVE) { restart(); play(); return; }
+    hideTitle();
+    if (!LIVE) { restart(); hideTitle(); play(); return; }
     const single = S.uiMode === 'single';
     const body = {
       mode: single ? 'compromised' : 'doublethink',
@@ -820,6 +1058,7 @@
   }
 
   async function onVerify() {
+    hideTitle();
     setProofOpen(true);
     if (!LIVE) {
       const ev = recordedProof(false);
@@ -854,7 +1093,8 @@
 
   function toggleProof() {
     setProofOpen(!S.proofOpen);
-    if (!S.proofOpen && S.current && S.ledgerSession !== S.current) renderLedger(S.current);
+    // Closing the proof panel brings the latest run back on screen.
+    if (!S.proofOpen && S.current && S.view !== S.current) renderLedger(S.current);
   }
 
   function toggleResults() {
@@ -869,6 +1109,7 @@
   $('#proof-tamper').addEventListener('click', onTamper);
   $('#proof-bundle').addEventListener('click', onBundle);
   $('#answer-bar').addEventListener('click', () => toggleSheet(true));
+  $('#title').addEventListener('click', () => { if (LIVE) hideTitle(); else play(); });
 
   document.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -879,6 +1120,7 @@
       return;
     }
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    if (LIVE && titleShown()) { hideTitle(); return; }
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     const replayOnly = (fn) => { if (!LIVE) fn(); };
     switch (k) {
@@ -897,6 +1139,7 @@
   // ---------- boot ----------
   S = freshState();
   resetView();
+  if (!(Number(params.get('at')) > 0) && params.get('title') !== '0') showTitle();
   loadResults().then(() => {
     if ($('#results').classList.contains('open')) renderResults();
     if (LIVE) startLive(); else startReplay();
