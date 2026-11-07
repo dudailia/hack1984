@@ -208,6 +208,12 @@ class Handler(BaseHTTPRequestHandler):
 class FakeTavilyServer(ThreadingHTTPServer):
     daemon_threads = True
 
+    def handle_error(self, request, client_address):
+        # With keep-alive, a client that resets or drops its connection is a normal disconnect, not an error.
+        if isinstance(sys.exc_info()[1], (ConnectionResetError, BrokenPipeError, ConnectionAbortedError)):
+            return
+        super().handle_error(request, client_address)
+
 
 def make_server(port=None, host=LOOPBACK, fixtures_dir=pages.DEFAULT_FIXTURES, state_path=None, verbose=False):
     if host != LOOPBACK:
