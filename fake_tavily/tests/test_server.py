@@ -249,10 +249,13 @@ class RequestLogTest(unittest.TestCase):
                 data = None if body is None else json.dumps(body).encode()
                 req = urllib.request.Request(base + path, data=data, headers={"Authorization": "Bearer tvly-x"})
                 try:
-                    urllib.request.urlopen(req, timeout=5).read()
+                    with urllib.request.urlopen(req, timeout=5) as resp:
+                        resp.read()
                 except urllib.error.HTTPError as e:
-                    e.read()
-        lines = err.getvalue().splitlines()
+                    with e:  # an unclosed HTTPError is a ResourceWarning on stderr (Python 3.14)
+                        e.read()
+        # only the server's own lines; the interpreter may write warnings to the same stderr
+        lines = [line for line in err.getvalue().splitlines() if line.startswith("fake_tavily")]
         self.assertEqual(len(lines), 3, lines)
         for line, path in zip(lines, ("/health", "/search", "/nope")):
             m = self.LINE.match(line)

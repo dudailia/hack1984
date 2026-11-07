@@ -10,7 +10,9 @@ import io
 import json
 import re
 import socket
+import struct
 import threading
+import time
 import unittest
 from unittest import mock
 
@@ -169,6 +171,32 @@ class KeepAliveTest(unittest.TestCase):
             s.close()
         self.assertEqual(self.logged(), [("POST", "/search", "200"), ("POST", "/search", "200")])
         self.assertEqual([c[0] for c in self.calls], ["search", "search"])
+
+
+class ClientResetTest(unittest.TestCase):
+    """A client that resets a kept-alive connection (common after reading one response) is not an error: no
+    traceback on stderr, and the server keeps serving."""
+
+    def test_reset_after_a_response_is_quiet(self):
+        srv = fake_server.make_server(port=0)
+        threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            for _ in range(3):
+                s = socket.create_connection(("127.0.0.1", srv.server_address[1]), timeout=5)
+                s.sendall(http_request("/search", {"query": "payments growth"}))
+                s.recv(64)  # part of the response only
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))  # close with RST
+                s.close()
+            s = socket.create_connection(("127.0.0.1", srv.server_address[1]), timeout=5)
+            s.sendall(http_request("/search", {"query": "payments growth"}, "Connection: close\r\n"))
+            self.assertEqual(read_responses(s, 1)[0][0], 200)
+            s.close()
+            time.sleep(0.2)
+        self.assertNotIn("Traceback", err.getvalue())
+        self.assertNotIn("ConnectionResetError", err.getvalue())
 
 
 if __name__ == "__main__":
