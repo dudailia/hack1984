@@ -46,18 +46,31 @@ _thread = None
 # ---------------------------------------------------------------- Gate client (loopback only)
 
 class GateError(Exception):
-    """status: the Gate's HTTP status, or None when there was no HTTP answer (connection failure)."""
+    """status: the Gate's HTTP status if it was 4xx/5xx, else None (connection failure, or HTTP 200 with
+    "status": "error"). reply: the parsed Gate reply when there was one; an upstream failure carries the ledger rows
+    of an attempt that was sent, and those must still reach the UI."""
 
-    def __init__(self, code, detail=None, status=None):
+    def __init__(self, code, detail=None, status=None, reply=None):
         super().__init__("%s: %s" % (code, detail))
-        self.code, self.detail, self.status = code, detail, status
+        self.code, self.detail, self.status, self.reply = code, detail, status, reply
+
+    def ledger_rows(self):
+        rows = self.reply.get("ledger") if isinstance(self.reply, dict) else None
+        return rows if isinstance(rows, list) and rows else None
 
 
 def recoverable(e):
-    """A Gate 4xx on a Planner action: skip the action, keep the run. A 5xx, no HTTP answer (connection failure)
-    or a session error (unknown_session) ends the run."""
-    return (isinstance(e, GateError) and type(e.status) is int and 400 <= e.status < 500
-            and e.code != "unknown_session")
+    """Skip the action and keep the run for
+    - a Gate 4xx, except a session error (unknown_session);
+    - an upstream failure: HTTP 200 with "status": "error" and ledger rows, i.e. the Gate sent the payload and
+      Tavily or Anthropic failed (its rows are emitted before this is asked).
+    A 5xx from the Gate itself, no HTTP answer (connection failure), an unreadable reply or a session error ends
+    the run."""
+    if not isinstance(e, GateError) or e.code == "unknown_session":
+        return False
+    if type(e.status) is int:
+        return 400 <= e.status < 500
+    return isinstance(e.reply, dict) and e.reply.get("status") == "error" and e.ledger_rows() is not None
 
 
 def gate_port(path=ENV_PATH):
@@ -105,7 +118,7 @@ class GateClient:
             raise GateError("bad_response", "not an object", status=status if status >= 400 else None)
         if status >= 400 or out.get("status") == "error":
             raise GateError(out.get("error") or "http_%d" % status, out.get("detail"),
-                            status=status if status >= 400 else None)
+                            status=status if status >= 400 else None, reply=out)
         return out
 
     def session(self, body):
@@ -131,8 +144,8 @@ class _BaselineGate:
     """What baseline.agent.run expects (create_session, search), mapped onto our Gate client. The baseline
     creates the session itself, so start_run does not create it for baseline modes (one session per run)."""
 
-    def __init__(self, gate, mode):
-        self._gate, self._mode = gate, mode
+    def __init__(self, gate, mode, on_error_rows=None):
+        self._gate, self._mode, self._on_error_rows = gate, mode, on_error_rows
 
     def create_session(self, session_id, mode, memo, canary, confirmed_secrets, approved_public_terms,
                        source="fake"):
@@ -141,7 +154,13 @@ class _BaselineGate:
                                    "approved_public_terms": approved_public_terms})
 
     def search(self, session_id, need, query, preset):
-        return self._gate.search(session_id, need, query, preset, component="baseline")
+        try:
+            return self._gate.search(session_id, need, query, preset, component="baseline")
+        except GateError as e:
+            # a sent payload that failed upstream: its rows reach the UI and the red team before the error does
+            if self._on_error_rows is not None and e.ledger_rows():
+                self._on_error_rows(e.reply, need, query)
+            raise
 
 
 def _default_baseline_runs():
@@ -292,52 +311,66 @@ class _Run:
                 self.step(action, "extract", ids=ids, typed_results=typed_results, query_of=query_of)
         self.budget_hit = True
 
-    def gate_call(self, fn, *args):
-        """A Gate call for a Planner action. A 4xx (not unknown_session) returns None: the action is skipped and
-        the run goes on. Anything else propagates and ends the run. Error code and detail go to stderr only."""
+    def gate_call(self, fn, *args, show=None):
+        """A Gate call for a Planner action. If the error reply carries ledger rows (a payload that was sent and
+        failed upstream), show(reply) emits them first, so every sent payload reaches the UI. Then: a 4xx (not
+        unknown_session) returns None, the action is skipped and the run goes on; anything else propagates and ends
+        the run. Error code and detail go to stderr only, never to the Planner."""
         try:
             return fn(*args)
         except GateError as e:
+            if show is not None and e.ledger_rows():
+                show(e.reply)
             if not recoverable(e):
                 raise
-            print("app.loop: run %s: Gate refused %s (%s, HTTP %s); action skipped"
+            print("app.loop: run %s: Gate refused or upstream failed: %s (%s, HTTP %s); action skipped"
                   % (self.sid, getattr(fn, "__name__", "call"), e.code, e.status), file=sys.stderr)
             return None
 
     def step(self, action, kind, typed_results, query_of, query=None, ids=None):
         """One budget step: a search, or an extract of one same-search group, then its read."""
         need, cts = action["need"], action["claim_types"]
+
+        def display(resp):
+            n = len(resp.get("result_ids") or [])
+            if kind == "search":
+                return {"label": "Tavily search", "need": need, "query": query, "summary": None,
+                        "result_count": n, "detail": resp.get("detail")}
+            return {"label": "Tavily extract", "need": need, "query": None, "summary": "extract " + ", ".join(ids),
+                    "result_count": n, "detail": resp.get("detail")}
+
+        def show(reply):
+            self.emit_ledger(reply, display(reply), kind, query=query)
+
         if kind == "search":
-            resp = self.gate_call(self.gate.search, self.sid, need, query, action["preset"])
+            resp = self.gate_call(self.gate.search, self.sid, need, query, action["preset"], show=show)
             if resp is None:
                 return
             n = len({v[0] for v in query_of.values()}) + 1
             for rid in resp.get("result_ids") or []:
                 query_of[rid] = (n, query)
-            display = {"label": "Tavily search", "need": need, "query": query, "summary": None,
-                       "result_count": len(resp.get("result_ids") or []), "detail": resp.get("detail")}
             public_query = query
         else:
-            resp = self.gate_call(self.gate.extract, self.sid, need, ids, action["preset"])
+            resp = self.gate_call(self.gate.extract, self.sid, need, ids, action["preset"], show=show)
             if resp is None:
                 return
-            display = {"label": "Tavily extract", "need": need, "query": None,
-                       "summary": "extract " + ", ".join(ids),
-                       "result_count": len(resp.get("result_ids") or []), "detail": resp.get("detail")}
             public_query = query_of[ids[0]][1]
         # the need exists once the Gate has taken the request (a refused request adds no "not found" need)
         entry = self.needs.setdefault(need, {"need": need, "claim_types": [], "label": need_label(need)})
         entry["claim_types"] += [c for c in cts if c not in entry["claim_types"]]
-        self.emit_ledger(resp, display, kind, query=query)
+        show(resp)
 
         typed = {"need": need, "found": False, "values": []}
         got = resp.get("result_ids") or []
         if resp.get("status") == "sent" and got:
-            rd = self.gate_call(self.gate.read, self.sid, need, got, cts)
+            def show_read(reply):
+                self.emit_ledger(reply, {"label": "Reader", "need": need, "query": None,
+                                         "summary": "reading job %s: %d documents" % (reply.get("job"), len(got)),
+                                         "result_count": len(got), "detail": reply.get("detail")}, "reader")
+
+            rd = self.gate_call(self.gate.read, self.sid, need, got, cts, show=show_read)
             if rd is not None:
-                self.emit_ledger(rd, {"label": "Reader", "need": need, "query": None,
-                                      "summary": "reading job %s: %d documents" % (rd.get("job"), len(got)),
-                                      "result_count": len(got), "detail": rd.get("detail")}, "reader")
+                show_read(rd)
                 if rd.get("status") == "sent":
                     docs = [{"result_id": d.get("result_id"), "title": d.get("title"), "url": d.get("url"),
                              "excerpt": d.get("excerpt"), "highlights": d.get("highlights") or []}
@@ -366,19 +399,21 @@ class _Run:
         self.answered = True
 
     def baseline(self):
+        def show(resp, need, q):
+            self.emit_ledger(resp, {"label": "Tavily search", "need": need, "query": q, "summary": None,
+                                    "result_count": len(resp.get("result_ids") or []), "detail": resp.get("detail")},
+                             "search", query=q, component="baseline")
+
         def on_step(step):
             resp = step.get("response") or {}
             q = step.get("query")
-            ids = resp.get("result_ids") or []
-            self.emit_ledger(resp, {"label": "Tavily search", "need": step.get("need"), "query": q, "summary": None,
-                                    "result_count": len(ids), "detail": resp.get("detail")},
-                             "search", query=q, component="baseline")
+            show(resp, step.get("need"), q)
             if resp.get("status") == "sent":
                 docs = [{"result_id": r.get("result_id"), "title": r.get("title"), "url": r.get("url"),
                          "excerpt": r.get("content"), "highlights": []} for r in resp.get("results") or []]
                 self.emit("docs_read", {"by": "baseline", "job": None, "public_query": q, "docs": docs})
 
-        self.baseline_runs[self.mode](self.spec, _BaselineGate(self.gate, self.mode), on_step)
+        self.baseline_runs[self.mode](self.spec, _BaselineGate(self.gate, self.mode, on_error_rows=show), on_step)
         self.budget_hit = True
 
     def summary(self, outcome_error):
