@@ -29,7 +29,8 @@ def build_request(model, today, system, user):
         "format": ACTION_SCHEMA,
         "options": {"temperature": 0},
         "messages": [
-            {"role": "system", "content": "Today is %s. %s" % (today.isoformat(), system)},
+            {"role": "system", "content": system if system.startswith("Today is ") else
+             "Today is %s. %s" % (today.isoformat(), system)},
             {"role": "user", "content": user},
         ],
     }

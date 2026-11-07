@@ -422,6 +422,12 @@ class LoaderTest(unittest.TestCase):
         self.assertIs(fn, loop.start_run)
         self.assertFalse(is_stub)
 
+    def test_uses_proof_tamper_helper_when_present(self):
+        if not os.path.exists(os.path.join(run.REPO, "proof", "tamper.py")):
+            self.skipTest("proof/tamper.py not merged")
+        from proof import tamper
+        self.assertIs(run.load_tamper_helper(), tamper.tamper_and_verify)
+
     def test_tamper_helper_absent_is_none(self):
         if os.path.exists(os.path.join(run.REPO, "proof", "tamper.py")):
             self.skipTest("proof/tamper.py exists")
