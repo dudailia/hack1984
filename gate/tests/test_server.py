@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import http.client
 import io
 import json
@@ -17,6 +18,66 @@ ALLOW = {"decision": "allow", "rule": None, "detail": None}
 def session(sid, mode="doublethink", source="real"):
     return {"session_id": sid, "mode": mode, "source": source, "memo": "PROJECT X memo", "canary": "c4n4ry",
             "confirmed_secrets": [{"label": "buyer", "values": ["Ossory"]}], "approved_public_terms": ["payments"]}
+
+
+class TestRunAllSeesSessionUpdates(unittest.TestCase):
+    """End to end through the HTTP server: the session run_all receives on the 2nd search reflects the 1st."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.led = Ledger(os.path.join(self.dir.name, "t.db"))
+        self.seen = []
+        self.replies = [tavily_reply(3, start=0, credits=1), tavily_reply(2, start=3, credits=1)]
+
+        def run_all(payload, session, kind):
+            self.seen.append(copy.deepcopy(session))  # snapshot exactly what the checks were given
+            return ALLOW
+
+        def transport(dest, path, payload, headers):
+            return self.replies.pop(0)
+
+        self.srv = server.make_server(self.led, transport, run_all, lambda m, t: [], fake_port=8702,
+                                      tavily_key="tvly-K", port=0)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+        self.led.close()
+        self.dir.cleanup()
+
+    def post(self, path, body):
+        conn = http.client.HTTPConnection("127.0.0.1", self.srv.server_address[1], timeout=5)
+        conn.request("POST", path, body=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+        r = conn.getresponse()
+        out = (r.status, json.loads(r.read()))
+        conn.close()
+        return out
+
+    def test_second_run_all_sees_first_search(self):
+        self.assertEqual(self.post("/v1/session", session("s_e2e000001"))[0], 200)
+        q1, q2 = "payments processing growth 2025", "listed payments companies ev revenue"
+        for q in (q1, q2):
+            st, b = self.post("/v1/search", {"session_id": "s_e2e000001", "component": "planner", "need": "n",
+                                             "query": q, "options": {"preset": "general"}})
+            self.assertEqual((st, b["status"]), (200, "sent"))
+        self.assertEqual(len(self.seen), 2)
+
+        first, second = self.seen
+        self.assertEqual((first["queries_sent"], first["call_count"], first["credits_used"]), ([], 0, 0))
+        self.assertEqual(first["public_text_received"], [])
+
+        urls = [f"https://ex{i}.example.com/a" for i in range(3)]
+        self.assertEqual(second["queries_sent"], [q1])
+        for i in range(3):
+            self.assertIn(f"Title {i}", second["public_text_received"])
+            self.assertIn(f"Content {i}", second["public_text_received"])
+        self.assertEqual(second["urls_returned"], urls)
+        self.assertEqual(second["result_ids"], {"r_01": urls[0], "r_02": urls[1], "r_03": urls[2]})
+        self.assertEqual(second["call_count"], 1)
+        self.assertEqual(second["credits_used"], 1)
+        # nothing from the second search leaked backwards into what the second call saw
+        self.assertNotIn("Content 3", second["public_text_received"])
 
 
 class TestServer(unittest.TestCase):
