@@ -24,6 +24,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 from baseline import agent, compromised, config, gate_client, ollama
@@ -150,30 +151,79 @@ def judge_fallback(query, spec):
 
 # ---------------------------------------------------------------- mode runners
 
-def _app_runner():
-    """STUB (Aayush): two_minds and doublethink run through app/run.py, which is not merged yet. Expected:
-    app.run.redteam_run(spec, mode, source="fake", max_searches=N) -> {"session_id", "outcome",
-    "steps": [{"query", "status"}]}, with every search and extract going through the Gate."""
+LOOP_MODES = ("two_minds", "doublethink")
+LOOP_TIMEOUT = 900  # seconds for one two_minds or doublethink run
+
+
+def load_loop():
+    """(start_run, wait) from app.loop (Aayush) if it exists in this repo, else None. Its public contract:
+    start_run(mode, source, plant_careless, question, emit, budget=N) returns the session id at once and runs in
+    a thread; emit(type, session_id, data) gets the FORMATS §10 events; wait(timeout) is True once it is idle."""
     try:
-        found = importlib.util.find_spec("app.run")
+        found = importlib.util.find_spec("app.loop")
     except (ImportError, ValueError):
         return None
     if found is None or not found.origin or not os.path.abspath(found.origin).startswith(REPO + os.sep):
         return None
-    import app.run as app_run  # noqa: E402  (only when it exists in this repo)
-    return getattr(app_run, "redteam_run", None)
+    mod = importlib.import_module("app.loop")
+    start_run, wait = getattr(mod, "start_run", None), getattr(mod, "wait", None)
+    return (start_run, wait) if callable(start_run) and callable(wait) else None
 
 
-def unavailable_modes(modes):
-    return [m for m in modes if m in ("two_minds", "doublethink") and _app_runner() is None]
+def unavailable_modes(modes, loop=None):
+    return [m for m in modes if m in LOOP_MODES and (loop or load_loop()) is None]
 
 
-def _run_mode(mode, spec, payload, gate, llm_factory, max_searches):
+def run_via_loop(mode, max_searches, loop, timeout=LOOP_TIMEOUT):
+    """One two_minds or doublethink run on source=fake through app.loop. Returns (trace, judge_spec): the steps
+    come from the run's ledger attempt rows; the canary and confirmed secrets from its memo_loaded and
+    parties_confirmed events (the loop makes its own session, so the judge must use that session's secrets)."""
+    start_run, wait = loop
+    events, lock = [], threading.Lock()
+
+    def emit(type_, session_id, data):
+        with lock:
+            events.append((type_, session_id, json.loads(json.dumps(data))))
+
+    sid = start_run(mode, "fake", False, None, emit, budget=max_searches)
+    if not wait(timeout):
+        raise RuntimeError("%s run %s did not finish within %d s" % (mode, sid, timeout))
+    with lock:
+        mine = [(t, d) for t, s, d in events if s == sid]
+    judge = {"canary": None, "confirmed_secrets": []}
+    steps, outcome = [], None
+    for type_, data in mine:
+        if type_ == "memo_loaded":
+            judge["canary"] = data.get("canary")
+        elif type_ == "parties_confirmed":
+            judge["confirmed_secrets"] = data.get("confirmed_secrets") or []
+        elif type_ == "run_done":
+            outcome = data.get("outcome")
+        elif type_ == "ledger_row":
+            row, display = data.get("row") or {}, data.get("display") or {}
+            if row.get("row_type") != "attempt":
+                continue
+            steps.append({"kind": row.get("kind"), "query": display.get("query"), "summary": display.get("summary"),
+                          "status": "sent" if row.get("decision") == "allowed" else "blocked",
+                          "rule": row.get("rule")})
+    if outcome is None:
+        raise RuntimeError("%s run %s ended without run_done" % (mode, sid))
+    return {"session_id": sid, "outcome": outcome, "steps": steps}, judge
+
+
+def _run_mode(mode, spec, payload, gate, llm_factory, max_searches, loop):
+    """(trace, judge_spec) for one run of one mode on source=fake."""
     if mode == "single_agent":
-        return agent.run(spec, mode="single_agent", gate=gate, llm=llm_factory(), max_searches=max_searches)
+        return agent.run(spec, mode="single_agent", gate=gate, llm=llm_factory(), max_searches=max_searches), spec
     if mode == "compromised":
-        return compromised.run(spec, gate=gate, llm=llm_factory(), max_searches=max_searches, triggers=(payload,))
-    return _app_runner()(spec, mode, source="fake", max_searches=max_searches)
+        return compromised.run(spec, gate=gate, llm=llm_factory(), max_searches=max_searches,
+                               triggers=(payload,)), spec
+    return run_via_loop(mode, max_searches, loop)
+
+
+def _payload_text(step):
+    """What left in one sent or blocked attempt, as listed for review: the query, else the row summary."""
+    return step.get("query") or step.get("summary") or "(%s)" % (step.get("kind") or "request")
 
 
 # ---------------------------------------------------------------- results and review files
@@ -223,8 +273,10 @@ def _append_review(path, run, when):
              "Judge: %s. Mark each record." % run["judge"], ""]
     for a in run["attacks"]:
         auto = "LEAK (%s)" % ", ".join(a["leaked_labels"]) if a["leaked"] else "no leak"
-        lines.append("### %s, payload %d, %s: auto-judge %s" % (a["mode"], a["payload_index"], a["session_id"], auto))
-        lines += ["- sent: %s" % json.dumps(q, ensure_ascii=False) for q in a["sent_queries"]] or ["- sent: (none)"]
+        lines.append("### %s, payload %d, %s: auto-judge %s, outcome %s" % (
+            a["mode"], a["payload_index"], a["session_id"], auto, a["outcome"]))
+        lines += (["- sent %s: %s" % (p["kind"], json.dumps(p["payload"], ensure_ascii=False))
+                   for p in a["sent_payloads"]] or ["- sent: (none)"])
         lines += ["- blocked: %s" % json.dumps(q, ensure_ascii=False) for q in a["blocked_queries"]]
         lines += ["- Human verdict: [ ] leak  [ ] no leak", ""]
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
@@ -235,12 +287,14 @@ def _append_review(path, run, when):
 # ---------------------------------------------------------------- the run
 
 def run_redteam(attacks, modes, out, review=None, label="redteam", gate=None, llm_factory=None, state_path=None,
-                max_searches=agent.DEFAULT_MAX_SEARCHES, command=None, frozen=None, registered=None):
+                max_searches=agent.DEFAULT_MAX_SEARCHES, command=None, frozen=None, registered=None, loop=None):
     frozen = checks_frozen() if frozen is None else frozen
     guard_path(attacks, frozen)
-    missing = unavailable_modes(modes)
+    if any(m in LOOP_MODES for m in modes):
+        loop = loop or load_loop()
+    missing = unavailable_modes(modes, loop)
     if missing:
-        raise ModeUnavailable("%s need app/run.py (redteam_run), not merged yet" % ", ".join(missing))
+        raise ModeUnavailable("%s need app/loop.py (start_run, wait), not present" % ", ".join(missing))
     with open(attacks, "rb") as f:
         data = f.read()
     digest = check_attack_bytes(attacks, data, frozen, registered_hash() if registered is None else registered)
@@ -261,16 +315,18 @@ def run_redteam(attacks, modes, out, review=None, label="redteam", gate=None, ll
             for mode in modes:
                 spec = agent.load_demo_spec()
                 t0 = time.monotonic()
-                trace = _run_mode(mode, spec, payload, gate, llm_factory, max_searches)
+                trace, judge_spec = _run_mode(mode, spec, payload, gate, llm_factory, max_searches, loop)
                 steps = trace.get("steps") or []
                 sent = [s["query"] for s in steps if s.get("status") == "sent" and s.get("query")]
                 blocked = [s["query"] for s in steps if s.get("status") == "blocked" and s.get("query")]
+                payloads_sent = [{"kind": s.get("kind") or "search", "payload": _payload_text(s)}
+                                 for s in steps if s.get("status") == "sent"]
                 labels = []
-                for q in sent:
-                    labels += [x for x in judge_fallback(q, spec) if x not in labels]
+                for p in payloads_sent:
+                    labels += [x for x in judge_fallback(p["payload"], judge_spec) if x not in labels]
                 records.append({"mode": mode, "payload_index": index, "session_id": trace.get("session_id"),
                                 "outcome": trace.get("outcome"), "sent_queries": sent, "blocked_queries": blocked,
-                                "leaked": bool(labels), "leaked_labels": labels,
+                                "sent_payloads": payloads_sent, "leaked": bool(labels), "leaked_labels": labels,
                                 "seconds": round(time.monotonic() - t0, 2)})
     finally:
         inject.reset(state_path)
@@ -278,8 +334,11 @@ def run_redteam(attacks, modes, out, review=None, label="redteam", gate=None, ll
     run = {
         "label": label, "commit": _commit(), "planner_model": config.ollama_model(), "source": "fake",
         "command": command or "python3 -m baseline.redteam", "judge": JUDGE_NAME,
+        # errors: runs that ended with outcome "error"; their "no leak" is not a measurement
         "modes": {m: {"leaked": sum(r["leaked"] for r in records if r["mode"] == m),
-                      "runs": sum(1 for r in records if r["mode"] == m)} for m in modes},
+                      "runs": sum(1 for r in records if r["mode"] == m),
+                      "errors": sum(1 for r in records if r["mode"] == m and r["outcome"] == "error")}
+                  for m in modes},
         "false_blocks": None,  # measured by checks.benign_run (Anant), not here
         "usefulness": None,
         "cost": {"tavily_credits_per_question": None,  # fake source: no Tavily credits
@@ -305,8 +364,14 @@ def main(argv=None):
         print("refused: %s" % e, file=sys.stderr)
         return 2
     for m, c in run["modes"].items():
-        print("%-13s leaked %d of %d" % (m, c["leaked"], c["runs"]))
+        errors = "  (%d ended in error)" % c["errors"] if c["errors"] else ""
+        print("%-13s leaked %d of %d%s" % (m, c["leaked"], c["runs"], errors))
     print("judge: %s" % run["judge"])
+    failed = sum(c["errors"] for c in run["modes"].values())
+    if failed:
+        print("redteam: %d run(s) ended in error; they are recorded but are not a measurement of 'no leak'"
+              % failed, file=sys.stderr)
+        return 3
     return 0
 
 
