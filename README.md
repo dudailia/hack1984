@@ -109,26 +109,53 @@ The usual fixes do not close this:
 
 ## How to run
 
-Requirements: Python 3.11 or newer, the `cryptography` package, [Ollama with `qwen3:8b`], a Tavily API key and an
-Anthropic API key (the Gate is the only process that reads them).
+Requirements: Python 3.11 or newer, the `cryptography` package, Ollama with the Planner model (`qwen3:8b` on the
+demo laptop), a Tavily API key and an Anthropic API key. Only the Gate reads the API keys.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install cryptography
-cp .env.example .env        # [.env.example not added yet] then fill in TAVILY_API_KEY and ANTHROPIC_API_KEY
-ollama pull qwen3:8b        # [Planner not built yet]
+ollama pull qwen3:8b
 ```
+
+Create `.env` in the repo folder (never commit it; [.env.example not added yet]). The Gate and the Planner read it
+directly, not from the shell environment:
+
+```
+TAVILY_API_KEY=...
+ANTHROPIC_API_KEY=...
+APP_PORT=8700
+GATE_PORT=8701
+FAKE_TAVILY_PORT=8702
+OLLAMA_MODEL=qwen3:8b
+```
+
+Start everything with one command. It starts the Gate and the local Tavily stand-in as child processes, waits for
+both to be healthy, and prints the UI address with this launch's token; Ctrl-C stops all three:
+
+```bash
+python3 -m app.run
+# http://127.0.0.1:8700/ui/index.html?token=...
+```
+
+Open the printed address in a browser. The token is required by the page's API calls and the live event stream.
 
 | What | Command |
 |---|---|
 | All tests | `python3 -m unittest discover` |
-| Start the app and UI (loopback, port 8700) | [`python3 app/run.py`, not built yet] |
-| Verify a proof bundle offline | [`python3 proof/verify.py bundles/<session_id>.json`, not built yet] |
-| Red team: 40 attacks against all four setups | [`python3 -m baseline.redteam --attacks ATTACKS.md --modes all --out shared/results/results.json`, not built yet] |
-| False blocks on the 30 benign questions | [`python3 -m checks.benign_run notes/BENIGN.md`, not built yet] |
+| Start the app, the Gate and the Tavily stand-in | `python3 -m app.run` (prints the UI address with its token) |
+| Export a session as a signed bundle | `python3 -m proof.export <session_id>` (writes `bundles/<session_id>.json`) |
+| Verify a bundle offline | `python3 proof/verify.py bundles/<session_id>.json` (prints VALID or INVALID with the row; `--json` for machine output) |
+| Change one byte of a copy and verify it | `python3 -m proof.tamper bundles/<session_id>.json <seq>` |
+| Red team: the 40 attacks against all four setups | `python3 -m baseline.redteam --attacks ATTACKS.md --modes all --out shared/results/results.json` (with `python3 -m app.run` running; only after the `checks-frozen` tag; writes `review.md` next to the results file) |
+| False blocks on the 30 benign questions | `python3 -m checks.benign_run notes/BENIGN.md` (`--json` for the results file) |
+| Usefulness on the 30 benign questions | `python3 -m eval.usefulness --app-url '<the printed UI address>'` (`--dry-run` sends nothing, `--limit 3` for a smoke run) |
+| Tavily credits and seconds per question | `python3 -m eval.cost` |
 
-The single-agent baseline and the compromised mode only ever run against a local stand-in for Tavily, never the
-real service.
+The verify button in the UI does the same as `proof/verify.py`. The single-agent baseline, the compromised mode
+and every red-team run only ever use the local stand-in for Tavily, never the real service. The red-team runner
+refuses the attack file before `checks-frozen` exists, and it exits with an error if any run ended in error,
+because such a run is not a measurement of "no leak".
 
 ## Results
 
