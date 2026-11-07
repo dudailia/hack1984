@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(~/doublethink/**)",
+      "Edit(~/doublethink/**)",
+      "Read(./.env)",
+      "Read(./notes/ATTACKS.md)"
+    ]
+  }
+}
