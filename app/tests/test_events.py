@@ -103,6 +103,12 @@ class ReplayTest(unittest.TestCase):
         self.assertFalse(self.hub.known("s_nope0000"))
         self.assertFalse(self.hub.finished("s_nope0000"))
 
+    def test_running(self):
+        self.assertEqual(self.hub.running(), "s_new00000")
+        self.hub.emit("run_done", "s_new00000", {})
+        self.assertIsNone(self.hub.running())
+        self.assertIsNone(events.EventHub().running())
+
     def test_no_run_yet(self):
         self.assertEqual(events.EventHub().subscribe().backlog, [])
 

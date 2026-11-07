@@ -90,6 +90,13 @@ class EventHub:
         with self._lock:
             return session_id in self._finished
 
+    def running(self):
+        """The session of the latest run_started if it has no run_done yet, else None."""
+        with self._lock:
+            if self._current is not None and self._current not in self._finished:
+                return self._current
+            return None
+
     def events(self, session_id):
         with self._lock:
             return list(self._sessions.get(session_id, []))

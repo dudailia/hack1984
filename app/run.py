@@ -13,6 +13,9 @@ Routes (§11). The token is required on /api/* and /events, as ?token= or the X-
 - POST /api/run {mode, source, plant_careless, question}   -> {session_id}
 - POST /api/verify {session_id}                            Gate bundle -> bundles/<id>.json -> proof/verify.py
 - POST /api/tamper {session_id, seq}                       one byte changed in a COPY, then verified
+- POST /api/inject {text}, POST /api/inject/reset          "Try to break it": plant text on the stand-in's
+                                                           poisoned page (fake_tavily.inject); refused (409)
+                                                           while a run is active; text 1 to 2,000 characters
 - GET /api/bundle?session_id=                              bundle download
 Verify, tamper and bundle answer 404 for a session this app did not run or that has not finished (no run_done).
 
@@ -35,12 +38,14 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from app.events import PING, EventHub, frame
 from baseline import config
+from fake_tavily import inject as fake_inject
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOOPBACK = "127.0.0.1"
@@ -56,6 +61,7 @@ PROOF_KEYS = ("bundle_head", "tampered", "tampered_seq", "valid", "broken_at_seq
               "signer_key_sha256")
 MAX_BODY = 64 * 1024
 MAX_QUESTION = 500
+MAX_INJECT = 2000
 _LOOKUP = object()
 
 
@@ -143,7 +149,7 @@ def flip_row_byte(data, seq):
 
 class App:
     def __init__(self, root=REPO, gate_port=None, token=None, bundles_dir=None, verify_cmd=None, start_run=None,
-                 tamper_helper=_LOOKUP, ping_interval=15.0, hub=None):
+                 tamper_helper=_LOOKUP, ping_interval=15.0, hub=None, inject_state_path=None):
         self.root = os.path.realpath(root)
         self.gate_port = gate_port if gate_port is not None else config.gate_port()
         self.token = token or secrets.token_urlsafe(32)
@@ -153,6 +159,11 @@ class App:
         self.tamper_helper = tamper_helper
         self.ping_interval = ping_interval
         self.hub = hub or EventHub()
+        # None = fake_tavily.inject's default (FAKE_TAVILY_STATE or fake_tavily/state/planted.txt), the file the
+        # stand-in started by the launcher reads on every request.
+        self.inject_state_path = inject_state_path
+        self._run_lock = threading.Lock()  # serialises /api/run with /api/inject*
+        self._last_sid = None              # the session /api/run last started, until the hub sees its run_done
 
     def ui_url(self, port):
         return "http://%s:%d/ui/index.html?token=%s" % (LOOPBACK, port, self.token)
@@ -203,15 +214,45 @@ class App:
         if not isinstance(question, str) or not question.strip() or len(question) > MAX_QUESTION:
             raise ApiError(400, "bad_request", "question must be 1 to %d characters" % MAX_QUESTION)
         start_run = self.start_run or load_start_run()[0]
-        try:
-            sid = start_run(mode, source, careless, question, self.hub.emit)
-        except ValueError as e:
-            if "already active" in str(e).lower():
-                raise ApiError(409, "run_in_progress", str(e))
-            raise ApiError(400, "bad_request", str(e))
-        if not isinstance(sid, str) or not SESSION_RE.match(sid):
-            raise ApiError(500, "bad_session_id", "the run loop returned an invalid session id")
+        with self._run_lock:
+            try:
+                sid = start_run(mode, source, careless, question, self.hub.emit)
+            except ValueError as e:
+                if "already active" in str(e).lower():
+                    raise ApiError(409, "run_in_progress", str(e))
+                raise ApiError(400, "bad_request", str(e))
+            if not isinstance(sid, str) or not SESSION_RE.match(sid):
+                raise ApiError(500, "bad_session_id", "the run loop returned an invalid session id")
+            self._last_sid = sid
         return {"session_id": sid}
+
+    # ---- "Try to break it": the planted text on the stand-in's poisoned page
+    def run_active(self):
+        """True while a run has started and not reached run_done (app.loop always emits run_done)."""
+        last = self._last_sid
+        return self.hub.running() is not None or (last is not None and not self.hub.finished(last))
+
+    def _refuse_if_running(self):
+        if self.run_active():
+            raise ApiError(409, "run_in_progress", "wait for the current run to finish")
+
+    def api_inject(self, body):
+        _only_keys(body, {"text"})
+        text = body.get("text")
+        if not isinstance(text, str) or not text or len(text) > MAX_INJECT or "\x00" in text:
+            raise ApiError(400, "bad_request", "text must be 1 to %d characters" % MAX_INJECT)
+        with self._run_lock:
+            self._refuse_if_running()
+            fake_inject.set_planted(text, self.inject_state_path)
+        return {"status": "ok", "chars": len(text)}
+
+    def api_inject_reset(self, body):
+        if body is not None:
+            _only_keys(body, set())
+        with self._run_lock:
+            self._refuse_if_running()
+            fake_inject.reset(self.inject_state_path)
+        return {"status": "ok"}
 
     # ---- sessions and bundles
     def finished_session(self, sid):
@@ -425,7 +466,8 @@ def _handler(app):
 
         def do_POST(self):
             u = urlsplit(self.path)
-            routes = {"/api/run": app.api_run, "/api/verify": app.api_verify, "/api/tamper": app.api_tamper}
+            routes = {"/api/run": app.api_run, "/api/verify": app.api_verify, "/api/tamper": app.api_tamper,
+                      "/api/inject": app.api_inject, "/api/inject/reset": app.api_inject_reset}
             route = routes.get(u.path)
             if route is None:
                 status = 405 if any(u.path.startswith(p) for p in STATIC) else 404
