@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Doublethink</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wordmark" aria-label="Doublethink">DOUBLE<span class="wm-wall" aria-hidden="true"></span>THINK</div>
+
+  <div class="toggle" role="group" aria-label="Mode">
+    <button type="button" id="mode-single" aria-pressed="false" title="Key 1">Single agent</button>
+    <button type="button" id="mode-dt" aria-pressed="true" title="Key 2">Doublethink</button>
+  </div>
+
+  <span id="badge" class="badge">SOURCE: —</span>
+
+  <div class="spacer"></div>
+
+  <div class="run-opts live-only">
+    <label class="sr-only" for="source">Source for the next run</label>
+    <select id="source">
+      <option value="fake">fake</option>
+      <option value="real">real</option>
+    </select>
+    <label class="check"><input type="checkbox" id="careless"> careless query</label>
+  </div>
+  <span id="replay-status" class="replay-status replay-only" aria-live="off">REPLAY</span>
+
+  <button type="button" id="run">Run</button>
+  <button type="button" id="verify" title="Key V">Verify proof</button>
+</header>
+
+<main id="main" class="main dt">
+
+  <section id="planner" class="room" aria-labelledby="planner-title">
+    <header class="room-head">
+      <h2 id="planner-title">Planner room</h2>
+      <p class="sub">never reads the web</p>
+    </header>
+    <div class="scroll">
+      <h3 class="label">Memo</h3>
+      <div id="memo" class="memo"><p class="empty" data-empty></p></div>
+      <h3 class="label">Typed facts (numbers only)</h3>
+      <ol id="typed" class="typed"></ol>
+    </div>
+  </section>
+
+  <section id="agent" class="room" aria-labelledby="agent-title">
+    <header class="room-head">
+      <h2 id="agent-title">One agent</h2>
+      <p class="sub">sees the memo and the web</p>
+    </header>
+    <div class="scroll">
+      <h3 class="label">Memo</h3>
+      <div id="agent-memo" class="memo"><p class="empty" data-empty></p></div>
+      <hr class="divider">
+      <h3 class="label">Web</h3>
+      <div id="agent-web"></div>
+    </div>
+  </section>
+
+  <section id="gate" class="gate" aria-labelledby="gate-title">
+    <header class="room-head">
+      <h2 id="gate-title">The gate</h2>
+      <p class="sub" id="gate-sub">only door out</p>
+    </header>
+    <div id="exit" class="exit"></div>
+    <p id="ledger-session" class="ledger-session"></p>
+    <div class="scroll" id="ledger-scroll">
+      <ol id="ledger" class="ledger" role="log" aria-live="polite" aria-label="Outbound ledger"></ol>
+      <p id="ledger-empty" class="empty">No requests yet. Every request that leaves is written here before it is sent.</p>
+    </div>
+  </section>
+
+  <section id="reader" class="room" aria-labelledby="reader-title">
+    <header class="room-head">
+      <h2 id="reader-title">Reader room</h2>
+      <p class="sub">never sees the secret</p>
+    </header>
+    <div class="scroll" id="reader-body">
+      <p class="empty">No web text yet.</p>
+    </div>
+  </section>
+
+  <section id="proof" class="room proof" aria-labelledby="proof-title">
+    <header class="room-head">
+      <h2 id="proof-title">Proof</h2>
+      <p class="sub" id="proof-session">no session yet</p>
+    </header>
+    <div class="scroll">
+      <dl class="proof-facts">
+        <div><dt>bundle head</dt><dd id="proof-head">—</dd></div>
+        <div><dt>rows checked</dt><dd id="proof-rows">—</dd></div>
+      </dl>
+      <div id="verdict" class="verdict-slot"><p class="empty">Not verified yet. Press Verify proof.</p></div>
+      <div class="proof-actions">
+        <button type="button" id="proof-verify">Verify proof</button>
+        <div class="tamper">
+          <button type="button" id="proof-tamper">Tamper one byte</button>
+          <label for="tamper-seq">row</label>
+          <input id="tamper-seq" type="number" min="1" step="1" value="3">
+        </div>
+        <button type="button" id="proof-bundle">Download bundle</button>
+      </div>
+      <p class="note">Tamper edits a copy of the bundle. The ledger is never changed.</p>
+      <p class="note">Check it offline:</p>
+      <pre class="cmd"><code id="proof-cmd">python3 proof/verify.py bundles/&lt;session_id&gt;.json</code></pre>
+      <p class="note replay-only">Replay: these buttons play the recorded results.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="bottom">
+  <button type="button" id="answer-bar" class="answer-bar" disabled title="Key A">
+    <span class="label">Answer</span>
+    <span id="answer-text" class="answer-text">—</span>
+    <span class="open">Open</span>
+  </button>
+  <dl class="metrics">
+    <div id="m-leaks"><dt>Leaks</dt><dd>0</dd></div>
+    <div id="m-blocked"><dt>Blocked</dt><dd>0</dd></div>
+    <div id="m-credits"><dt>Credits</dt><dd>0</dd></div>
+    <div id="m-seconds"><dt class="sr-only">Seconds</dt><dd>— s</dd></div>
+  </dl>
+</footer>
+
+<section id="sheet" class="sheet" role="dialog" aria-modal="false" aria-labelledby="sheet-title"></section>
+<section id="results" class="results" aria-labelledby="results-title"></section>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

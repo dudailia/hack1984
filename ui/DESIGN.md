@@ -2,7 +2,7 @@
 
 Owner: Sheara. Source of truth for event names, fields, endpoints and paths: shared/FORMATS.md (it wins over this file).
 Anything below marked **TO CONFIRM** is not in FORMATS.md and must be agreed with its owner before code depends on it.
-The list of open items is in section 10.
+Section 10 lists the open and resolved items.
 
 Direction: **two rooms and a wall**, dressed as HACK1984: black, off-white, one red, monospace.
 The screen must make three things obvious with no explanation:
@@ -83,8 +83,11 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
 ## 4. Layout
 
 ### Frame (1280x720)
-- Header, 56px: the DOUBLETHINK wordmark, a mode toggle `[ Single agent | Doublethink ]`, a source badge, then the
-  buttons Run, Verify proof, Bundle.
+- Header, 56px: the DOUBLETHINK wordmark (split by a 4px wall), a mode toggle `[ Single agent | Doublethink ]`, a
+  source badge, then Run and Verify proof.
+  - Live mode adds the source selector and the "careless query" switch next to Run.
+  - Replay mode shows the replay status in their place: `REPLAY ▶ 0:42`.
+  - Download bundle and Tamper one byte live in the proof panel (section 6), so the header fits 1280px.
 - Main area, about 576px: three columns sized 1fr, 1.3fr and 1fr. The middle column is wider because it holds the
   ledger.
 - Footer, 88px: the answer bar and the metrics strip.
@@ -179,9 +182,8 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
 - The ledger header says `recorded, not enforced`. That is the truth in fake-only modes (FORMATS §1).
 - A row counts as a leak when it is an `allowed` attempt with a non-null `rule` (FORMATS §10). It gets the LEAKED
   stamp, and every confirmed secret value that appears literally in `display.query` is wrapped in a red highlight.
-- **TO CONFIRM (Aayush, Ilia):** when the toggle is on Single agent, should Run post `mode: "single_agent"` or
-  `mode: "compromised"` to `/api/run`? The demo fixture uses `compromised`. In replay mode the toggle only filters
-  which recorded run is shown.
+- **Resolved (section 10, item 3):** when the toggle is on Single agent, Run posts `mode: "compromised"` with
+  `source: "fake"` (notes/DEMO.md). In replay mode the toggle only switches the layout.
 
 ## 5. Motion
 
@@ -306,17 +308,24 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
 - **Local preview:** from the repo root run `python -m http.server 8703 --bind 127.0.0.1` and open
   `http://127.0.0.1:8703/ui/index.html`. On this Windows machine the command is `python`, not `python3`. In live mode
   the same files are served by app/run.py on `APP_PORT` (8700).
-  - **TO CONFIRM (group chat):** port 8703 is not in the FORMATS port table. Announce it so no one else takes it.
+  - Port 8703 is the agreed preview port (section 10, item 5).
+- **Replay or live:** the page is live when its URL has `?token=` and replays the fixture otherwise. `?replay=1`
+  forces replay, and `?at=<ms>` jumps the replay to that time (for screenshots and the presenter).
 
-## 10. TO CONFIRM (not in shared/FORMATS.md)
+## 10. Items not in shared/FORMATS.md
 
+### Open
 | # | Item | Owner | What the UI does until it is settled |
 |---|---|---|---|
-| 1 | The name of the token parameter in the UI URL that app/run.py prints at startup. FORMATS §11 says the token is "in the UI URL" but does not name the parameter. | Aayush | Read `?token=` from the page URL, the same name `/events` uses. |
-| 2 | How the page reads `shared/results/results.json`, given that app/run.py serves only `/ui/` and `/shared/fixtures/`. | Aayush | Try `/shared/results/results.json`, then fall back to the example file with the banner. |
-| 3 | Which mode the Single agent toggle posts to `/api/run`: `single_agent` or `compromised`. | Aayush, Ilia | Post `compromised`, which is what the demo fixture uses. |
-| 4 | What the Run button sends for `source` and `plant_careless` in Doublethink mode. The demo has three Doublethink runs: fake, careless and real. | Aayush, Ilia | A small source selector next to Run, defaulting to `fake`, `plant_careless: false`. |
-| 5 | Port 8703 for the static preview. | group chat | Use it for local preview only. |
+| 2 | How the page reads `shared/results/results.json`. On 8700, app/run.py serves only `/ui/` and `/shared/fixtures/`. | Aayush | Try `/shared/results/results.json`, then fall back to `/shared/fixtures/results_example.json` with its banner. |
+
+### Resolved
+| # | Item | Resolution | Source |
+|---|---|---|---|
+| 1 | The token in the UI URL | `?token=` in the page URL. The page sends it as `?token=` on `/events` and `/api/bundle`, and as the `X-DT-Token` header on `/api/*` POSTs. | Aayush confirmed |
+| 3 | The mode for the Single agent toggle | `compromised` (with `source: "fake"`) | notes/DEMO.md |
+| 4 | The body Run sends | `POST /api/run {"mode", "source": "real"\|"fake", "plant_careless": true\|false}`. The source selector next to Run sets `source`, and a "careless query" switch sets `plant_careless`. Single agent forces `fake`. | Aayush |
+| 5 | The preview port | `python -m http.server 8703 --bind 127.0.0.1` from the repo root | Ilia proposed |
 
 Checked against FORMATS.md and present there (no action needed):
 - Events: all twelve event types (§10).
