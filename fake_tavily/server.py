@@ -133,6 +133,11 @@ ROUTES = {"/search": do_search, "/extract": do_extract}
 class Handler(BaseHTTPRequestHandler):
     server_version = "fake-tavily/1"
     sys_version = ""
+    # HTTP/1.1 keep-alive: several requests on one connection are each answered, routed and logged. Every
+    # response carries Content-Length; any path that does not read the request body closes the connection, so
+    # unread body bytes are never parsed as a request line (or logged as one).
+    protocol_version = "HTTP/1.1"
+    timeout = 30  # an idle keep-alive connection does not hold a thread forever
 
     def log_message(self, fmt, *args):
         # The request line holds method and path only; headers (Authorization included) are never logged.
@@ -144,13 +149,21 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(data)
+
+    def _close_unless_bodyless(self):
+        """Before answering without reading the body: close the connection if a body might follow."""
+        if self.headers.get("Content-Length", "0").strip() != "0" or self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
 
     def _error(self, status, message):
         self._send(status, {"detail": {"error": message}})
 
     def do_GET(self):
+        self._close_unless_bodyless()
         if urlsplit(self.path).path == "/health":
             self._send(200, {"status": "ok"})
         else:
@@ -160,12 +173,20 @@ class Handler(BaseHTTPRequestHandler):
         t0 = time.perf_counter()
         route = ROUTES.get(urlsplit(self.path).path)
         if route is None:
+            self._close_unless_bodyless()
             return self._error(404, "Not found")
+        if self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
+            return self._error(411, "Content-Length required")
         try:
             length = int(self.headers.get("Content-Length") or 0)
+            if length < 0:
+                raise ValueError
         except ValueError:
+            self.close_connection = True
             return self._error(400, "Invalid Content-Length")
         if length > MAX_BODY:
+            self.close_connection = True
             return self._error(413, "Request body too large")
         try:
             body = json.loads(self.rfile.read(length) or b"null")
