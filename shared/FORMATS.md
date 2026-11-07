@@ -119,11 +119,14 @@ Response:
  "claims":[{"claim_type":"revenue_growth","subject":"global payments processing market","value":9.8,"unit":"percent","period":"2025-2030","quote":"The global payments processing market is projected to grow at a compound annual rate of 9.8% from 2025 to 2030.","document_id":"r_01"},{"claim_type":"revenue_growth","subject":"merchant acquiring revenue","value":7.4,"unit":"percent","period":"2025","quote":"Merchant acquiring revenue grew 7.4% in 2025, according to the survey.","document_id":"r_02"}],
  "dropped":[],
  "sources":{"r_01":{"url":"https://research.example.com/payments-outlook-2030","title":"Payments processing market outlook 2025-2030"},"r_02":{"url":"https://news.example.org/merchant-acquiring-2025","title":"Merchant acquiring: volumes and margins in 2025"}},
+ "docs":[{"result_id":"r_01","title":"Payments processing market outlook 2025-2030","url":"https://research.example.com/payments-outlook-2030","excerpt":"Card acceptance kept widening last year. The global payments processing market is projected to grow at a compound annual rate of 9.8% from 2025 to 2030. Growth is strongest among small merchants."},{"result_id":"r_02","title":"Merchant acquiring: volumes and margins in 2025","url":"https://news.example.org/merchant-acquiring-2025","excerpt":"Merchant acquiring revenue grew 7.4% in 2025, according to the survey. Margins held steady."}],
  "ledger":["<reader attempt row>","<reader result row>"]}
 ```
 - **`typed` is the only thing the Planner ever receives from the web.** Its keys are fixed: need, found, and values[]
   with claim_type, value (number), unit (enum), period (format) and result_id. planner/schema.py rejects any other key
   and any string outside these formats. `claims`, `sources` and `dropped` go to the Composer and UI only.
+- `docs`: `[{result_id, title, url, excerpt}]`, one entry per document read, `excerpt` up to 2,000 characters of the
+  document text. For the UI's `docs_read` event only; never part of `typed`.
 
 `GET /v1/bundle?session_id=…` → bundle bytes (§8). `GET /v1/health` → `{"status":"ok"}`.
 
@@ -202,7 +205,12 @@ result = checks.run_all(payload, session, kind)
 - Everything about how a decision is reached belongs to Anant and is not specified here.
 - If `run_all` raises, the Gate blocks with `gate.check_error` (fail closed).
 - Gate-owned rules: `gate.host_not_allowed`, `gate.fake_not_allowed`, `gate.anthropic_not_reader`,
-  `gate.unknown_result_id`, `gate.check_error`. Gate rules are applied first, then run_all.
+  `gate.unknown_result_id`, `gate.check_error`, `gate.path_not_allowed`, `gate.reader_error`. Gate rules are applied
+  first, then run_all.
+  - `gate.path_not_allowed`: the path is not allowed for the destination. `api.anthropic.com` takes only
+    `POST /v1/messages`; `api.tavily.com` and the fake take only `/search` and `/extract`.
+  - `gate.reader_error`: `reader.build_request`, `reader.parse_response` or `reader.validate` raised or returned a bad
+    shape. Fail closed: nothing is typed for that job.
 
 ## 7. Ledger
 SQLite `ledger/doublethink.db` (gitignored). Append only; rows are never updated. Request headers are never stored.
@@ -360,6 +368,7 @@ planted that page)
 {"seq":62,"t_ms":112000,"time":"2026-11-07T23:41:52.000Z","session_id":"s_dtreal1","type":"proof_result","data":{"bundle_head":"cf7ffc930a74f3cd6484f080c85811d193507c5e3e0133ff8cb9be1f6a23a9ae","tampered":true,"tampered_seq":3,"valid":false,"broken_at_seq":3,"rows_checked":3,"reason":"hash_mismatch"}}
 ```
 - The page marks every row from `broken_at_seq` down as broken.
+- `signer_key_sha256` (optional): lowercase hex or null, passed through from `proof/verify.py --json`.
 
 **beat** (replay file only)
 ```json
@@ -371,6 +380,7 @@ planted that page)
 The per-launch token is in the UI URL printed at startup. It is required on `/api/*` and `/events` (as `?token=` or
 the `X-DT-Token` header).
 - `GET /ui/…` and `GET /shared/fixtures/…`: static, read only (the page lives at `/ui/index.html`).
+- `GET /shared/results/…`: static, read only, same rules as `/shared/fixtures/…`.
 - `GET /events`: SSE (§10).
 - `POST /api/run` `{"mode":"doublethink","source":"real","plant_careless":false}` → `{"session_id":"s_…"}`.
 - `POST /api/verify` `{"session_id":"s_dtreal1"}`: exports the bundle, runs `proof/verify.py --json` as a
@@ -379,8 +389,16 @@ the `X-DT-Token` header).
   verifies the copy. It never touches the ledger or the original bundle. Emits `proof_result`.
 - `GET /api/bundle?session_id=s_dtreal1`: bundle download.
 - Endpoints are Aayush's; export, verify and tamper logic is Anant's (proof/).
+- Run loop contract: `start_run(mode, source, plant_careless, question, emit)` returns the `session_id` immediately and
+  runs the loop in its own thread. It reports through `emit(type, session_id, data)`. It raises `ValueError` for bad
+  input or while a run is active.
 
 ## Changelog
 - 2026-11-07: first agreed version.
 - 2026-11-07: §5 example Anthropic body: no `temperature`; adds `"thinking":{"type":"disabled"}`.
 - 2026-11-07: §8 signed message also covers `exported`.
+- 2026-11-07: §6 Gate-owned rules add `gate.path_not_allowed` and `gate.reader_error`.
+- 2026-11-07: §3 `/v1/read` response adds `docs` (excerpt up to 2,000 chars), for the UI's `docs_read` only.
+- 2026-11-07: §11 app/run.py also serves `/shared/results/…` statically, read only.
+- 2026-11-07: §10 `proof_result` adds optional `signer_key_sha256` (lowercase hex or null).
+- 2026-11-07: §11 run loop contract: `start_run(...)` and `emit(type, session_id, data)`.
