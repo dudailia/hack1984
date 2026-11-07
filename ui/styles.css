@@ -253,7 +253,7 @@ body.replay .live-only, body.live .replay-only { display: none !important; }
 }
 .eye-open { color: var(--text); }
 .eye-red { color: var(--red); opacity: 0; }
-.eye-closed { color: var(--text-muted); opacity: 0; }
+.eye-closed { color: var(--text); opacity: 0; }
 .eye.closed .eye-open, .eye.closed .eye-red { opacity: 0; transform: scaleY(0.15); }
 .eye.closed .eye-closed { opacity: 1; }
 .eye.red:not(.closed) .eye-red { opacity: 1; }
@@ -357,7 +357,18 @@ body.replay .live-only, body.live .replay-only { display: none !important; }
 .typed li { padding: var(--sp-2) 0; border-top: 1px solid var(--line); }
 .typed li:first-child { border-top: 0; padding-top: 0; }
 .typed .tneed { color: var(--text-muted); }
-.typed .val { padding-left: var(--sp-4); }
+/* Typed facts as receipt chips: the number large, unit and period small, the result id muted. */
+.chips { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin-top: var(--sp-2); padding: 0 4px 4px 0; }
+.chip {
+  min-width: 9.5rem;
+  background: var(--surface-3);
+  border: 2px solid var(--slip-edge);
+  box-shadow: 3px 3px 0 var(--shadow-hard);
+}
+.chip-top { display: flex; align-items: baseline; gap: var(--sp-2); padding: var(--sp-1) var(--sp-3) 0; }
+.chip-num { font-size: var(--fs-3); font-weight: 700; line-height: 1.2; color: var(--text); }
+.chip-unit { color: var(--text-muted); }
+.chip-foot { padding: 2px var(--sp-3) var(--sp-1); border-top: 2px dashed var(--slip-edge); color: var(--text-muted); }
 
 /* ---------- material: receipt slips in the gate ---------- */
 .ledger { padding: var(--sp-2) 6px 6px 0; }
@@ -419,6 +430,9 @@ body.replay .live-only, body.live .replay-only { display: none !important; }
 .q { overflow-wrap: anywhere; }
 .rule { color: var(--red); }
 .rule .detail { color: var(--text); }
+/* An allowed attempt whose rule is not a leak rule (shape.*, gate.*): recorded, never red. */
+.rule.noted { color: var(--text-muted); }
+.rule.noted .detail { color: var(--text-muted); }
 .tag { display: inline-block; color: var(--text-muted); border: 1px solid var(--control-edge); padding: 0 var(--sp-2); margin-top: var(--sp-1); }
 .ledger li.blocked::before, .ledger li.leak::before, .ledger li.broken::before { opacity: 1; }
 .ledger li.broken .pslot { color: var(--red); font-weight: 700; }
@@ -499,7 +513,9 @@ mark.secret { background: var(--red); color: var(--on-red); padding: 0 0.1em; -w
 .addr .field b { color: var(--web-ink); }
 .page { background: var(--web-page); color: var(--web-ink); padding: var(--sp-3) var(--sp-3) var(--sp-3); }
 .doc-title { font-size: var(--fs-1); font-weight: 700; line-height: 1.3; }
-.doc-excerpt { margin-top: var(--sp-2); overflow-wrap: anywhere; }
+/* Excerpts can be up to 2,000 characters (FORMATS §3): they scroll inside the browser window. */
+.doc-excerpt { margin-top: var(--sp-2); overflow-wrap: anywhere; max-height: 12.5em; overflow-y: auto; padding-right: var(--sp-1); }
+.doc-excerpt:focus-visible { outline-color: var(--web-ink); }
 /* On a light page, red is always a solid fill with dark text (never red text on white). */
 mark.planted {
   background: var(--red);
@@ -526,6 +542,7 @@ mark.planted {
 /* ---------- proof panel ---------- */
 .proof { background: var(--surface-1); }
 .proof-facts div { display: flex; gap: var(--sp-3); }
+.proof-facts div[hidden] { display: none; }
 .proof-facts dt { color: var(--text-muted); min-width: 13ch; }
 .verdict-slot { margin: var(--sp-4) 0; min-height: 4.5rem; }
 .verdict { display: inline-block; font-size: var(--fs-5); font-weight: 700; line-height: 1.2; letter-spacing: 0.08em; padding: 0 0.3em; border: 4px solid; }

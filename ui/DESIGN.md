@@ -233,8 +233,17 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
     redaction bar (a --text block with the text hidden).
   - Hovering or focusing a bar shows the value and its label (`codename`, `buyer`, `price`, `person`, `canary`).
     Tab reaches each bar.
-  - Below the memo is a "Typed facts" list built from `planner_typed.data`: need, found, then each of `values[]` as
-    value, unit, period and result_id. There is no web text here, and the room's subtitle says so.
+  - Below the memo is a "Typed facts" list built from `planner_typed.data`. Each entry is a need line
+    (`sector_growth · found`), then one **receipt chip** per `values[]`:
+    - the slip material (`--surface-3`, a 2px `--slip-edge` outline, a 3px hard shadow);
+    - the **value large** (24px bold), then the **unit** word small and muted;
+    - a dashed tear line, then a foot `period · result_id` in muted text.
+
+    The unit stays the raw enum (`percent`, `multiple`), because that is exactly what the Planner receives. There is
+    no web text here, and the room's subtitle says so.
+  - The Planner room shows the session `S.view`, like the ledger. Its dossier and typed facts are stored per session
+    and redrawn by `showRunSummary()`. During the proof beats they switch to the verified run together with the
+    ledger, the answer bar and the counters.
 - **Gate ledger** (one entry per `ledger_row` event, using `data.row` and `data.display`):
   - Attempt rows (`row_type "attempt"`) show `seq`, `kind`, a short destination, `display.query` (or
     `display.summary` for reader rows), and the decision mark: `✓` cyan for allowed, `✕ BLOCKED` red for blocked.
@@ -246,15 +255,25 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
     footer, `#c2a8…3e01 · 139 B · 23:40:41` (`bytes`, and `time` as HH:MM:SS). On stubs it sits at the right of the
     line.
   - The material, receipt slips, is described in "Materials" below.
-  - `rule` and `display.detail` show under the row when they are set.
+  - `rule` and `display.detail` show under the row when they are set. Every rule renders the same way, including
+    the Gate-owned `gate.path_not_allowed` and `gate.reader_error` (FORMATS §6): red when the attempt was blocked.
+  - **Leak rule, word for word with FORMATS §10 (`run_done`):** an attempt is a **leak** only if it was `allowed`
+    and its `rule` is `canary` (exact) or starts with `secret.` or `provenance.`.
+    - A leak gets the LEAKED stamp and red, and counts in LEAKS.
+    - An allowed attempt with any other rule (`shape.*`, `gate.*`) is **noted**: it keeps the cyan `✓` and shows
+      `rule … · recorded, not a leak` in muted text, with no red, no stamp and no count.
+    - Note for the group: FORMATS line 339 (§10 `ledger_row` notes) still carries the old "non-null rule is a leak"
+      sentence, which the changelog has dropped. The UI follows the newer rule.
   - After a `blocked` event whose `data.planted` is true, the row is tagged `planted test query`.
 - **Reader room:**
   - It shows `docs_read.data`: the `public_query` at the top, then one browser window per `docs[]` (see
     "Materials").
   - Each `highlights[].text` is a solid red marker with `--on-red` text. `highlights[].label` sits underneath as a
     red chip ("▲ planted instruction (demo annotation)").
+  - Excerpts can be up to 2,000 characters (FORMATS §3). The text scrolls **inside** the browser window
+    (`max-height: 12.5em`), and is focusable (`tabindex="0"`, `role="region"`) so it can be scrolled by keyboard.
   - When a poisoned page arrives, the room scrolls to the top of its window, so the tab and address bar stay in
-    view.
+    view. The excerpt then scrolls just enough to show the planted line.
   - Below the cards come `reader_claims.data`: `kept` claims with their quotes, and `dropped` claims in muted text
     with `reason`.
 - **Answer bar:** a one-line summary of the `answer` event.
@@ -298,8 +317,9 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
 - The wall fades out (motion M8) and the two rooms merge into one 2fr column. The memo and the web text
   (`docs_read` with `by: "baseline"`) sit in the same panel with only a thin --line divider between them.
 - The ledger header says `recorded, not enforced`. That is the truth in fake-only modes (FORMATS §1).
-- A row counts as a leak when it is an `allowed` attempt with a non-null `rule` (FORMATS §10). It gets the LEAKED
-  stamp, and every confirmed secret value that appears literally in `display.query` is wrapped in a red highlight.
+- A row counts as a leak when it is an `allowed` attempt whose `rule` is `canary` or starts with `secret.` or
+  `provenance.` (FORMATS §10, see "Gate ledger"). It gets the LEAKED stamp, and every confirmed secret value that
+  appears literally in `display.query` is wrapped in a red highlight.
 - **Resolved (section 10, item 3):** when the toggle is on Single agent, Run posts `mode: "compromised"` with
   `source: "fake"` (notes/DEMO.md). In replay mode the toggle only switches the layout.
 
@@ -334,8 +354,9 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
   - `memo_id` is never shown, because it repeats the codename.
   - The One agent room shows everything in the clear, because that agent holds the secrets.
 - **The eye.** A 5-line ASCII eye, 20px bold (about 230×115px), sits at the right of the gate header.
-  - It is **open** in single agent layout (one model sees everything) and **closed**, as a lid line with lashes, in
-    Doublethink layout (nothing can leave).
+  - It is **open** in single agent layout (one model sees everything) and **closed** in Doublethink layout
+    (nothing can leave). The closed eye is a downward-curved lid from corner to corner (`<.` … `'-.___.-'` … `.>`)
+    with lashes hanging below (`/ /  |  \ \`), in off-white `--text`, in the same 19×5 box as the open eye.
   - At a leak, a red copy of the open eye fades in on top. Red here means the leak.
   - The eye resets on `run_started`. A screen-reader line states its state.
 - **Big counters.**
@@ -398,6 +419,9 @@ All motion uses `--ease`. Durations at or under 250ms, except the sequences abov
   - `PROOF · session {session_id}`, from the event envelope.
   - The boxed label `VERIFYING RUN {session_id} · {mode} · {source} · {outcome}`, the same as above the ledger.
   - `bundle head {first 4…last 4}` from `proof_result.data.bundle_head`, with the full hash on hover.
+  - `signer key {first 16 hex}…` from `proof_result.data.signer_key_sha256` (FORMATS §8, §10). It matches the
+    verifier's text output `VALID (signer key <16 hex>)`, with the full value on hover. It is shown only when the
+    field is a 64-hex string; when the field is absent or null, nothing is shown.
   - `rows checked {rows_checked}`.
   - The verdict stamp at --fs-5:
     - VALID: cyan text on --calm-bg with a cyan border.
@@ -422,12 +446,12 @@ All motion uses `--ease`. Durations at or under 250ms, except the sequences abov
 ## 7. Results screen (`beat.data.screen = "results"`, or key S)
 
 - It replaces the whole main area.
-- All numbers come from `shared/results/results.json`. Until that file exists, they come from
-  `shared/fixtures/results_example.json`. **No number is typed into the code.**
-  - **TO CONFIRM (Aayush):** app/run.py serves only `/ui/…` and `/shared/fixtures/…` (FORMATS §11), so on port 8700
-    the page cannot fetch `/shared/results/results.json`. Either app/run.py also serves `/shared/results/`, or the
-    real file gets copied into fixtures. Until that is settled, the page tries `/shared/results/results.json` first
-    and falls back to the example file.
+- All numbers come from `/shared/results/results.json`. Until that file exists, they come from
+  `/shared/fixtures/results_example.json`, with its banner. **No number is typed into the code.**
+  - app/run.py serves `/shared/results/` (FORMATS §11, confirmed by Ilia), and so does `ui/preview.py`.
+- FORMATS §9 still has one judgement per run (`leak_judge`, a single description). If it ever stores several
+  (for example the frozen detector plus a fallback), the screen shows the frozen-detector judgement and labels any
+  fallback clearly.
 - When `example` is true, a full-width banner shows the `banner` text in off-white on black with a 4px off-white
   border. It is not red.
 - Title: `{attacks_total} attacks, written and hashed before the code.` `attack_file_sha256` is shown short below
@@ -478,15 +502,33 @@ All motion uses `--ease`. Durations at or under 250ms, except the sequences abov
 
 ## 9. Data sources, files and preview
 
-- Files are `ui/index.html`, `ui/styles.css` and `ui/app.js`. `ui/fonts/` is added only with approval.
+- Files are `ui/index.html`, `ui/styles.css` and `ui/app.js`, plus `ui/preview.py` and its tests in `ui/tests/`.
+  `ui/fonts/` is added only with approval.
 - Replay reads `shared/fixtures/demo_events.jsonl` (one FORMATS §10 envelope per line) and waits on `t_ms`.
 - Live reads `GET /events?token=…` (SSE, no `event:` line). Replay and live share one dispatcher keyed on `type`.
 - Paths are relative to the one origin: the page is at `/ui/index.html` and the fixtures are read from
   `/shared/fixtures/…` (FORMATS §11).
-- **Local preview:** from the repo root run `python -m http.server 8703 --bind 127.0.0.1` and open
-  `http://127.0.0.1:8703/ui/index.html`. On this Windows machine the command is `python`, not `python3`. In live mode
-  the same files are served by app/run.py on `APP_PORT` (8700).
-  - Port 8703 is the agreed preview port (section 10, item 5).
+- **Local preview: `python ui/preview.py`**, then open `http://127.0.0.1:8703/ui/index.html`. On this Windows
+  machine the command is `python`, not `python3`. In live mode the same files are served by app/run.py on `APP_PORT`
+  (8700).
+  - **The repo root is no longer served** (Ilia's request). `python -m http.server` from the repo root exposed every
+    file, including notes, other folders and the ledger.
+  - `ui/preview.py` is standard library only (`ThreadingHTTPServer`). It binds **127.0.0.1:8703** only and installs
+    a loopback-only audit hook (invariant 1).
+  - It serves **only `/ui/` and `/shared/`**, and only page file types (`.html .css .js .json .jsonl .svg .png
+    .woff2`). `/` redirects to `/ui/index.html`.
+  - It refuses with 404:
+    - any other folder;
+    - `..`, `//`, `/./` and encoded traversal (`%2e%2e`, `%2f`, `%5c`);
+    - backslashes and NUL bytes;
+    - dotfiles (`.env`, `.git`);
+    - Python and Markdown files (including its own source);
+    - symlinks that resolve outside `ui/` or `shared/`.
+  - Directory listings get 403, and every method except GET and HEAD gets 501.
+  - Every response carries `Cache-Control: no-store` (so screenshots never show a stale page) and
+    `X-Content-Type-Options: nosniff`.
+  - Tests: `python -m unittest ui.tests.test_preview`.
+  - All screenshots are taken through `ui/preview.py`. Port 8703 is the agreed preview port (section 10, item 5).
 - **Replay or live:** the page is live when its URL has `?token=` and replays the fixture otherwise.
 - **URL parameters** for rehearsal and screenshot QA:
 
@@ -502,17 +544,16 @@ All motion uses `--ease`. Durations at or under 250ms, except the sequences abov
 ## 10. Items not in shared/FORMATS.md
 
 ### Open
-| # | Item | Owner | What the UI does until it is settled |
-|---|---|---|---|
-| 2 | How the page reads `shared/results/results.json`. On 8700, app/run.py serves only `/ui/` and `/shared/fixtures/`. | Aayush | Try `/shared/results/results.json`, then fall back to `/shared/fixtures/results_example.json` with its banner. |
+None.
 
 ### Resolved
 | # | Item | Resolution | Source |
 |---|---|---|---|
+| 2 | How the page reads `shared/results/results.json` | app/run.py serves `/shared/results/…` statically (FORMATS §11). The page reads `/shared/results/results.json` and falls back to the example file. | Ilia confirmed |
 | 1 | The token in the UI URL | `?token=` in the page URL. The page sends it as `?token=` on `/events` and `/api/bundle`, and as the `X-DT-Token` header on `/api/*` POSTs. | Aayush confirmed |
 | 3 | The mode for the Single agent toggle | `compromised` (with `source: "fake"`) | notes/DEMO.md |
 | 4 | The body Run sends | `POST /api/run {"mode", "source": "real"\|"fake", "plant_careless": true\|false}`. The source selector next to Run sets `source`, and a "careless query" switch sets `plant_careless`. Single agent forces `fake`. | Aayush |
-| 5 | The preview port | `python -m http.server 8703 --bind 127.0.0.1` from the repo root | Ilia proposed |
+| 5 | The preview port | 8703, served by `python ui/preview.py` (section 9), no longer from the repo root | Ilia proposed; restricted server at Ilia's request |
 
 Checked against FORMATS.md and present there (no action needed):
 - Events: all twelve event types (§10).
