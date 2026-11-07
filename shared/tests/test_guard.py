@@ -174,17 +174,94 @@ attempt("urllib_external", lambda: urllib.request.urlopen("https://example.com/"
                     self.assertEqual(r[k], "denied", k)
                 self.assertEqual(r["dns_localhost"], "ok")
 
-    def test_unix_sockets_allowed(self):
-        r = run_child('''
-def unix():
-    a, b = socket.socketpair()
-    a.close(); b.close()
+    def test_unix_sockets_refused(self):
+        body = '''
+UPATH = os.path.join(TMP, "listen.sock")
+ul = socket.socket(socket.AF_UNIX)            # a Unix listener that existed before the guard
+ul.bind(UPATH); ul.listen(4)
+ud = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+DPATH = os.path.join(TMP, "dgram.sock"); ud.bind(DPATH)
+guard.install_loopback_guard(ROLE, env_path=ENV)
+def bind_path():
     s = socket.socket(socket.AF_UNIX)
-    s.bind(os.path.join(TMP, "u.sock"))
-    s.close()
-attempt("unix", unix)
-''', role="planner")
-        self.assertEqual(r, {"unix": "ok"})
+    try: s.bind(os.path.join(TMP, "new.sock"))
+    finally: s.close()
+def bind_abstract():
+    s = socket.socket(socket.AF_UNIX)
+    try: s.bind("\\0doublethink-test-%d" % os.getpid())
+    finally: s.close()
+def connect_path():
+    s = socket.socket(socket.AF_UNIX)
+    try: s.connect(UPATH)
+    finally: s.close()
+def connect_ex_path():
+    s = socket.socket(socket.AF_UNIX)
+    try:
+        if s.connect_ex(UPATH) != 0: raise OSError("not connected")
+    finally: s.close()
+def sendto_path():
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    try: s.sendto(b"x", DPATH)
+    finally: s.close()
+def socketpair():
+    a, b = socket.socketpair()
+    a.sendall(b"x"); assert b.recv(1) == b"x"
+    a.close(); b.close()
+attempt("bind_path", bind_path)
+attempt("bind_abstract", bind_abstract)
+attempt("connect_path", connect_path)
+attempt("connect_ex_path", connect_ex_path)
+attempt("sendto_path", sendto_path)
+attempt("socketpair", socketpair)
+'''
+        for role in ("app", "planner", "baseline", "fake_tavily"):
+            with self.subTest(role=role):
+                r = run_child("ROLE = %r\n" % role + body)
+                self.assertEqual(r, {"bind_path": "denied", "bind_abstract": "denied", "connect_path": "denied",
+                                     "connect_ex_path": "denied", "sendto_path": "denied", "socketpair": "ok"})
+
+    def test_asyncio_loop_still_works(self):
+        """asyncio's self-pipe is a socketpair: refusing Unix sockets must not break an event loop."""
+        r = run_child('''
+import asyncio
+async def main():
+    await asyncio.sleep(0)
+    return 1
+attempt("loop", lambda: asyncio.run(main()))
+''', role="app")
+        self.assertEqual(r, {"loop": "ok"})
+
+
+class TestCtypes(unittest.TestCase):
+    def test_import_after_install_refused(self):
+        body = '''
+R["preloaded"] = "ctypes" in sys.modules
+guard.install_loopback_guard(ROLE, env_path=ENV)
+attempt("import", lambda: __import__("ctypes"))
+'''
+        for role in ("app", "planner", "baseline", "fake_tavily"):
+            with self.subTest(role=role):
+                r = run_child("ROLE = %r\n" % role + body)
+                self.assertEqual(r, {"preloaded": False, "import": "denied"})
+
+    def test_already_imported_ctypes_cannot_be_used(self):
+        r = run_child('''
+import ctypes
+libc = ctypes.CDLL(None)
+getpid = libc.getpid                          # symbol resolved before the guard
+buf = ctypes.create_string_buffer(8)
+guard.install_loopback_guard("baseline", env_path=ENV)
+attempt("call_resolved", lambda: getpid())
+attempt("dlopen", lambda: ctypes.CDLL(None))
+attempt("dlsym", lambda: libc.connect)
+attempt("string_at", lambda: ctypes.string_at(ctypes.addressof(buf), 1))
+attempt("memmove", lambda: ctypes.memmove(buf, b"ab", 2))
+attempt("new_buffer", lambda: ctypes.create_string_buffer(4))
+attempt("pythonapi", lambda: ctypes.pythonapi.Py_IsInitialized())
+attempt("cast_obj", lambda: ctypes.cast(id(R), ctypes.py_object).value)
+''')
+        for k, v in r.items():
+            self.assertEqual(v, "denied", k)
 
 
 class TestProxies(unittest.TestCase):

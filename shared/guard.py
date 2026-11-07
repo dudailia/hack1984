@@ -12,7 +12,12 @@ After install, in this process (behaviour of baseline/netguard.py, plus per-role
       fake_tavily  no connects                         bind FAKE_TAVILY_PORT
   any other loopback port, port 0 included, raises PermissionError;
 - DNS lookups for non-loopback names raise PermissionError ("localhost" and loopback literals are fine);
-- Unix sockets are allowed;
+- Unix sockets are refused: connect, bind and sendto on any path or abstract name raise PermissionError
+  (nothing in the project uses them). socket.socketpair() still works: an in-process pair reaches nothing,
+  and asyncio's event loop needs it;
+- ctypes is refused: every "ctypes.*" audit event raises PermissionError (dlopen, dlsym, call_function,
+  string_at, cdata, ...). `import ctypes` itself fires ctypes.dlopen, so ctypes cannot be imported after install,
+  and if it was imported before, none of it can be used;
 - starting a program raises PermissionError, except these exact argv lists, started through subprocess with
   no shell, no cwd and no env, and only when the program actually run is the one fixed at install time:
       app       [sys.executable, ("-I"), <repo>/proof/verify.py, BUNDLE, ("--json")]   (POST /api/verify)
@@ -32,12 +37,16 @@ changing this module's variables, sys.executable or PATH after install changes n
 
 LIMITS, stated plainly:
 - This is a Python audit hook (PEP 578). It stops networking and program starts done through Python's own
-  socket, subprocess and os functions, which is all our code uses. It does NOT stop native code: ctypes,
-  cffi or a C extension can call connect() or execve() directly without raising any audit event.
+  socket, subprocess and os functions, which is all our code uses, and it refuses ctypes. It does NOT stop
+  native code that is already loaded: a C extension (or cffi module) imported before or after install can call
+  connect() or execve() directly without raising any audit event. Refusing ctypes closes the easy route from
+  pure Python to native calls, not that one.
+- A file descriptor inherited from the parent, or a socket made with socket.socket(fileno=...)/fromfd from one,
+  is already connected and needs no connect event.
 - The allowed child programs are not guarded themselves: proof/verify.py runs as a separate, unguarded
   Python process (it uses only the standard library and cryptography); git runs as itself.
 - A loopback service that fetches for you is outside the guard: Ollama on OLLAMA_PORT can be asked to pull a
-  model from a registry, and any Unix socket (for example a local proxy) is allowed.
+  model from a registry.
 - An audit hook cannot be removed, but code in the same process can still crash or exit the process.
 The macOS/Linux OS sandbox (stretch goal) is what would make this hold against native code.
 """
@@ -169,11 +178,11 @@ def _make_hook(role, connect_ports, bind_ports):
         return None
 
     def check_address(event, sock, address):
-        if address is None or getattr(sock, "family", None) == af_unix:
+        if address is None:
             return
+        if getattr(sock, "family", None) == af_unix or isinstance(address, (str, bytes, bytearray)):
+            deny("%s on a Unix socket" % event)  # paths and the abstract namespace; socketpair() needs neither
         if not isinstance(address, tuple) or len(address) < 2:
-            if isinstance(address, (str, bytes)):
-                return  # AF_UNIX path
             deny("%s to %r" % (event, address))
         host, port = address[0], address[1]
         if not is_loopback(host):
@@ -205,6 +214,8 @@ def _make_hook(role, connect_ports, bind_ports):
         deny("starting a program")
 
     def hook(event, args):
+        if event.startswith("ctypes."):
+            deny(event)  # dlopen (also fired by `import ctypes`), dlsym, call_function, string_at, cdata, ...
         if event == "socket.bind" or event in _CONNECT_EVENTS:
             check_address(event, args[0], args[1] if len(args) > 1 else None)
         elif event in _NAME_EVENTS:
