@@ -64,7 +64,7 @@ class TestCheckSystemExit(Base):
         def exits(p, s, k):
             raise SystemExit(1)
         sent = []
-        pipe = Pipeline(self.led, store, lambda *a: sent.append(a) or (200, b"{}"), exits, 8702)
+        pipe = Pipeline(self.led, store, lambda *a: sent.append(a) or (200, b"{}"), exits, 8702, keys={"tavily": "k"})
         out = pipe.send("s_hard00003", "planner", "search", "api.tavily.com", "/search", {"q": 1})
         self.assertEqual((out["status"], out["rule"]), ("blocked", "gate.check_error"))
         self.assertEqual(len(self.led.rows("s_hard00003")), 1)
@@ -115,7 +115,7 @@ class TestNegativeContentLength(Base):
     def test_negative_content_length_400(self):
         import http.client
         import threading
-        srv = server.make_server(self.led, lambda *a: (200, b"{}"), lambda p, s, k: None, lambda m, t: [], 8702, None,
+        srv = server.make_server(self.led, lambda *a: (200, b"{}"), lambda p, s, k: None, lambda m, t: [], 8702, {},
                                  port=0)
         t = threading.Thread(target=srv.serve_forever, daemon=True)
         t.start()

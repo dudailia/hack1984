@@ -6,7 +6,7 @@ import unittest
 
 from gate import canonical as c
 from gate.ledger import Ledger
-from gate.pipeline import Pipeline
+from gate.pipeline import GateConfigError, Pipeline
 from gate.session import SessionStore
 
 FAKE_PORT = 8702
@@ -69,13 +69,16 @@ class Base(unittest.TestCase):
             raise self.check
         return self.check
 
-    def pipe(self):
-        return Pipeline(self.led, self.store, self.tr, self.run_all, FAKE_PORT)
+    keys = {"tavily": "tvly-NEVERSTORE", "anthropic": "sk-ant-NEVERSTORE"}
 
-    def send(self, kind="search", dest="api.tavily.com", body=None, **kw):
+    def pipe(self):
+        return Pipeline(self.led, self.store, self.tr, self.run_all, FAKE_PORT, keys=self.keys)
+
+    def send(self, kind="search", dest="api.tavily.com", body=None, path=None, **kw):
         body = body if body is not None else {"query": "payments processing growth", "topic": "general"}
-        return self.pipe().send(self.sid, "planner", kind, dest, "/search", body,
-                                headers={"Authorization": "Bearer tvly-NEVERSTORE"}, **kw)
+        if path is None:
+            path = {"search": "/search", "extract": "/extract", "reader": "/v1/messages"}[kind]
+        return self.pipe().send(self.sid, "planner", kind, dest, path, body, **kw)
 
 
 class TestAllowed(Base):
@@ -99,16 +102,38 @@ class TestAllowed(Base):
 
     def test_headers_never_stored(self):
         self.send()
+        self.send(kind="reader", dest="api.anthropic.com")
         with open(os.path.join(self.dir.name, "t.db"), "rb") as f:
             con_bytes = f.read()
         self.assertNotIn(b"NEVERSTORE", con_bytes)
         self.assertNotIn(b"Authorization", con_bytes)
+        self.assertNotIn(b"x-api-key", con_bytes)
+
+    def test_gate_builds_headers_per_destination(self):
+        self.send()
+        self.send(kind="reader", dest="api.anthropic.com")
+        self.assertEqual(self.tr.calls[0][3], {"Authorization": "Bearer tvly-NEVERSTORE"})
+        self.assertEqual(self.tr.calls[1][3], {"x-api-key": "sk-ant-NEVERSTORE", "anthropic-version": "2023-06-01"})
+
+    def test_send_accepts_no_headers_or_keys(self):
+        for kw in ({"headers": {"X": "1"}}, {"api_key": "k"}):
+            with self.assertRaises(TypeError):
+                self.send(**kw)
+
+    def test_missing_key_is_config_error_before_ledger(self):
+        for kind, dest, keys in (("search", "api.tavily.com", {"anthropic": "a"}),
+                                 ("reader", "api.anthropic.com", {"tavily": "t"})):
+            self.keys = keys
+            with self.assertRaises(GateConfigError):
+                self.send(kind=kind, dest=dest)
+        self.assertEqual(self.led.rows(self.sid), [])
+        self.assertEqual(self.tr.calls, [])
 
     def test_check_gets_a_copy_of_session(self):
         def mutating(payload, session, kind):
             session["call_count"] = 999
             return ALLOW
-        Pipeline(self.led, self.store, self.tr, mutating, FAKE_PORT).send(
+        Pipeline(self.led, self.store, self.tr, mutating, FAKE_PORT, keys=self.keys).send(
             self.sid, "planner", "search", "api.tavily.com", "/search", {"q": 1})
         self.assertEqual(self.store.get(self.sid)["call_count"], 0)
 
@@ -208,6 +233,24 @@ class TestGateRules(Base):
     def test_reader_to_anthropic_allowed(self):
         out = self.send(dest="api.anthropic.com", kind="reader")
         self.assertEqual(out["status"], "sent")
+        self.assertEqual(self.tr.calls[-1][1], "/v1/messages")
+
+    def test_path_not_allowed(self):
+        bad = [("search", "api.tavily.com", "/crawl"), ("search", "api.tavily.com", "/search/"),
+               ("search", "api.tavily.com", "/search?x=1"), ("search", "api.tavily.com", "/extract"),
+               ("extract", "api.tavily.com", "/search"), ("search", "api.tavily.com", "/v1/messages"),
+               ("reader", "api.anthropic.com", "/v1/messages/batches"), ("reader", "api.anthropic.com", "/v1/files"),
+               ("reader", "api.anthropic.com", "/search"), ("search", "api.tavily.com", "")]
+        for kind, dest, path in bad:
+            self.assert_gate_block("gate.path_not_allowed", kind=kind, dest=dest, path=path)
+
+    def test_host_rule_before_path_rule(self):
+        self.assert_gate_block("gate.host_not_allowed", dest="evil.example.com", path="/crawl")
+
+    def test_allowed_paths(self):
+        self.assertEqual(self.send(kind="search")["status"], "sent")
+        self.assertEqual(self.send(kind="extract")["status"], "sent")
+        self.assertEqual([c[1] for c in self.tr.calls], ["/search", "/extract"])
 
 
 class TestFakeOnlyMode(Base):
@@ -222,6 +265,12 @@ class TestFakeOnlyMode(Base):
         a = out["rows"][0]
         self.assertEqual((a["decision"], a["rule"], a["destination"]), ("allowed", "secret.buyer", FAKE))
         self.assertEqual(len(self.tr.calls), 1)
+        self.assertEqual(self.tr.calls[0][3], {}, "the fake never gets a key")
+
+    def test_fake_path_pinned_even_in_fake_modes(self):
+        out = self.send(dest=FAKE, path="/admin")
+        self.assertEqual((out["status"], out["rule"]), ("blocked", "gate.path_not_allowed"))
+        self.assertEqual(self.tr.calls, [])
 
     def test_real_tavily_refused_on_fake(self):
         out = self.send(dest="api.tavily.com")

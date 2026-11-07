@@ -46,7 +46,8 @@ class Ledger:
     def __init__(self, path=DEFAULT_DB, nonce_fn=c.new_nonce, time_fn=c.utc_now):
         if os.path.abspath(path) == DEFAULT_DB:
             os.makedirs(os.path.dirname(DEFAULT_DB), exist_ok=True)
-        self._con = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
+        self.path = os.path.abspath(path)  # absolute, so proof/ export never depends on the cwd
+        self._con = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None)
         self._con.executescript(SCHEMA)
         self._lock = threading.Lock()
         self._nonce_fn = nonce_fn
