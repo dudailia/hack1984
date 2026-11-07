@@ -365,6 +365,8 @@ planted that page)
 {"seq":51,"t_ms":80000,"time":"2026-11-07T23:41:20.000Z","session_id":"s_dtreal1","type":"run_done","data":{"outcome":"answered","source":"real","credits_total":2,"seconds":13.7,"leaks":0,"blocked":0,"head":"cf7ffc930a74f3cd6484f080c85811d193507c5e3e0133ff8cb9be1f6a23a9ae"}}
 ```
 - outcome: `answered` | `leaked` | `blocked` | `budget` | `error`. `leaks` = allowed attempts with a non-null rule.
+- `leaks` and outcome `leaked` count only allowed attempts whose rule is `canary` (exact) or starts with `secret.`
+  or `provenance.`; `shape.*` and `gate.*` don't count. (Agreed by Ilia and Anant.)
 
 **proof_result**
 ```json
@@ -410,3 +412,5 @@ the `X-DT-Token` header).
 - 2026-11-07: §11 run loop contract: `start_run(...)` and `emit(type, session_id, data)`.
 - 2026-11-07: §8 verifier prints `VALID (signer key <16 hex>)`, `--json` adds `signer_key_sha256`, new optional
   `--pubkey FINGERPRINT` fails with `unexpected_signer` when another key signed.
+- 2026-11-07: §10 run_done.leaks and outcome 'leaked' count only allowed attempts whose rule is canary (exact)
+  or starts with secret. or provenance.; shape.* and gate.* don't count. (Agreed by Ilia and Anant.)
