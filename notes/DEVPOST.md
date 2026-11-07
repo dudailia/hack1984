@@ -35,7 +35,7 @@ Doublethink splits the agent into two minds and puts one gate between them and t
 
 - **Planner (local model, Ollama, qwen3:8b).** Holds the confidential memo and decides what to research. It never reads a web page. From the web it receives only typed facts: numbers, units, periods, found or not found.
 - **Reader (Claude, through the Gate).** Reads the web pages Tavily returns and extracts facts in a strict schema. It never sees the memo or the secrets, and it has no tools.
-- **Gate.** The only process allowed on the network. Exact host and path allowlist (Tavily search and extract, Anthropic messages). Every outbound request is checked for the confirmed secrets in any disguise (case, spacing, number formats, base64, hex, URL encoding, reversed text, a secret split across several queries) and a planted canary. Every attempt, blocked ones included, is written to a hash-chained ledger before it is sent.
+- **Gate.** The only process allowed on the network. Exact host and path allowlist (Tavily search and extract, Anthropic messages). Every outbound request is checked for the confirmed secrets in the listed encodings (case, spacing, number formats, base64, hex, URL encoding, reversed text, a secret split across several queries) and a planted canary. Every outbound request, blocked ones included, is written to a hash-chained ledger before it is sent.
 - **Validator and Composer (plain code, no model).** A fact is kept only if its quote appears verbatim in the fetched page and its number parses from that quote. Every number in the answer has a quoted sentence and a source, and is computed in code, never written by a model.
 - **Proof.** Each session exports as a bundle signed with Ed25519. A standalone verifier checks it offline and prints the signer key fingerprint. Change one byte and it says INVALID at that row.
 
@@ -45,8 +45,8 @@ A poisoned page can only reach the Reader, and the Reader has nothing to steal.
 
 ## How we built it
 - Python standard library only, plus `cryptography` for Ed25519. No agent framework.
-- Four separate processes on loopback: the app server and UI, the Gate, a local Tavily stand-in, and Ollama. Only the Gate opens outside connections; every other process binds and connects to 127.0.0.1 only, enforced by a loopback audit hook [confirm shared/guard.py is on main and installed in the app process before submitting].
-- **Tavily** for all live research: `topic: finance`, basic depth, preferred primary-source domains, extract with reranking on chosen results, and credits shown per run.
+- The separation is in what each model sees: the Planner runs in the app process and the Reader request is built inside the Gate. Only the Gate opens outside connections. The loopback guard is an in-process audit hook; it does not cover native code, child processes or Ollama. [confirm shared/guard.py is on main and installed in the app process before submitting]
+- **Tavily** for all live research: basic depth, three search presets the Planner picks from (general, news, and finance, which sets `topic: finance` and prefers primary-source domains; finance is a preset, not the default), extract with reranking on chosen results, and credits shown per run.
 - **Claude** (`claude-haiku-5-5`) as the Reader, called only through the Gate over plain HTTPS, with a request body the Gate sends byte for byte; thinking disabled, no tools.
 - A static UI with no CDN, no external fonts and no framework, driven by a server-sent event stream, with a recorded replay as the stage fallback.
 - Four people, one folder each, one shared data contract (`shared/FORMATS.md`) agreed at 11:15, merged through reviewed pull requests. 736 tests passing at the `checks-frozen` commit; [final count at submission].
@@ -89,7 +89,7 @@ The person who built the Gate checks did not see the file until the checks were 
 - Talk to chief compliance officers at registered PE advisers and registered M&A broker-dealers about design-partner pilots. No customers and no letters of intent yet.
 - Secret detection from the memo with human confirmation, instead of a fixed list.
 - An MCP server version, so existing agents can route their web access through the Gate.
-- OS-level sandboxing of the Planner and Reader processes, so isolation does not rely only on our code.
+- Today the separation is in what each model sees: the Planner runs in the app process and the Reader request is built inside the Gate. Next: run the Planner in its own sandboxed process, so isolation does not rely only on our code.
 
 ## What we do not claim
 - Not 100%. Prompt injection is not solved, and we report measured rates.
