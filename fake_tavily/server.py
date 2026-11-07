@@ -16,6 +16,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
+from baseline import netguard
 from fake_tavily import inject, pages
 
 LOOPBACK = "127.0.0.1"
@@ -192,7 +193,7 @@ def make_server(port=None, host=LOOPBACK, fixtures_dir=pages.DEFAULT_FIXTURES, s
 
 
 def main(argv=None):
-    # TODO(guard): install shared.guard (loopback-only audit hook, invariant 1) once it lands in shared/.
+    netguard.install()  # loopback only from here on (invariant 1); swap for shared.guard when it lands
     ap = argparse.ArgumentParser(prog="python3 -m fake_tavily.server", description="Loopback Tavily stand-in")
     ap.add_argument("--port", type=int, default=None, help="default: FAKE_TAVILY_PORT from env/.env, else 8702")
     args = ap.parse_args(argv)

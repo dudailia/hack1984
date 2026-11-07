@@ -28,6 +28,8 @@ def _claims_object(text):
             obj, _ = decoder.raw_decode(text, start)
         except ValueError:
             obj = None
+        except RecursionError:
+            return None  # deeply nested output: drop the whole response
         if isinstance(obj, dict) and isinstance(obj.get("claims"), list):
             return obj
         start = text.find("{", start + 1)

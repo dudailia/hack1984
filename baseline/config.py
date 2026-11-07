@@ -4,10 +4,14 @@ A value comes from the environment, else from the one matching line of the repo'
 Every other .env line (API keys included) is skipped unparsed and not kept.
 """
 import os
+import re
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ALLOWED_KEYS = {"APP_PORT", "GATE_PORT", "FAKE_TAVILY_PORT", "OLLAMA_PORT", "OLLAMA_MODEL"}
 DEFAULT_MODEL = "qwen3:4b"  # FORMATS §0: qwen3:4b for development, qwen3:8b on the demo laptop
+# A local library model: name[:tag], no registry or namespace path. Ollama "cloud" models (tag ending in
+# "cloud") run on ollama.com, so the memo would leave the machine outside the Gate (invariants 1 and 5).
+_LOCAL_MODEL = re.compile(r"[a-z0-9][a-z0-9._-]*(?::[a-z0-9][a-z0-9._-]*)?", re.IGNORECASE)
 
 
 def env_value(key, default, env=None, env_file=None):
@@ -50,5 +54,13 @@ def ollama_port(env=None, env_file=None):
     return _port("OLLAMA_PORT", 11434, env, env_file)
 
 
+def local_model(name):
+    """Return the model name stripped, or raise ValueError unless it names a local (non-cloud) model."""
+    name = name.strip() if isinstance(name, str) else name
+    if not isinstance(name, str) or not _LOCAL_MODEL.fullmatch(name) or name.lower().endswith("cloud"):
+        raise ValueError("OLLAMA_MODEL must name a local model (no cloud tag, no registry path), got %r" % (name,))
+    return name
+
+
 def ollama_model(env=None, env_file=None):
-    return env_value("OLLAMA_MODEL", DEFAULT_MODEL, env, env_file).strip() or DEFAULT_MODEL
+    return local_model(env_value("OLLAMA_MODEL", DEFAULT_MODEL, env, env_file).strip() or DEFAULT_MODEL)

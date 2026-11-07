@@ -9,7 +9,7 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from fake_tavily import pages
+from fake_tavily import inject, pages
 
 FAKE_ONLY_MODES = {"single_agent", "compromised", "two_minds"}
 ZERO_HASH = "0" * 64
@@ -80,14 +80,18 @@ def _error(status, code, detail):
 
 class StubGate(_Stub):
     """planted: the text substituted on the poisoned page ("" = page without the instruction).
-    poison_from_search: 1-based search number from which the poisoned page appears in results."""
+    poison_from_search: 1-based search number from which the poisoned page appears in results.
+    state_path: if set, the planted text is re-read from this fake_tavily.inject state file on every search,
+    like the real stand-in does (red-team tests)."""
 
-    def __init__(self, planted=None, poison_from_search=1, block_queries=()):
+    def __init__(self, planted=None, poison_from_search=1, block_queries=(), state_path=None):
         super().__init__()
         self.pages = pages.load_pages()
         self.planted = pages.default_planted(self.pages) if planted is None else planted
         self.poison_from_search = poison_from_search
         self.block_queries = set(block_queries)
+        self.state_path = state_path
+        self.served = []  # (session_id, query, planted text on the poisoned page)
         self.sessions = {}
         self.search_count = 0
         self.seq = 0
@@ -136,14 +140,16 @@ class StubGate(_Stub):
         attempt = self._row(sid, row_type="attempt", component=body.get("component"), kind="search",
                             destination=dest, commitment=ZERO_HASH, bytes=len(canonical(body)),
                             decision="allowed", rule=rule)
+        planted = inject.current_planted(self.state_path, self.pages) if self.state_path else self.planted
         found = pages.search(self.pages, query, 10)
         if self.search_count < self.poison_from_search:
             found = [p for p in found if not p.get("poisoned")]
         results = []
         for i, p in enumerate(found, start=1):
-            r = pages.render(p, self.planted)
+            r = pages.render(p, planted)
             results.append({"result_id": "r_%02d" % (self.search_count * 10 + i), "title": r["title"],
                             "url": r["url"], "content": r["content"]})
+        self.served.append((sid, query, planted))
         result_row = self._row(sid, row_type="result", attempt_seq=attempt["seq"], status="sent",
                                http_status=200, credits_used=None, response_commitment=ZERO_HASH)
         out = {"status": "sent", "rule": None, "ledger_seq": attempt["seq"],
