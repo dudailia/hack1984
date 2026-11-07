@@ -42,12 +42,17 @@ _SCALE_ALT = "|".join(sorted(map(re.escape, _SCALES), key=len, reverse=True))
 #   412,000,000      commas / underscores / spaces as thousands separators
 #   412000000        plain digits
 # then an optional decimal part, an optional exponent (4.12e8), an optional scale word.
+#
+# SAFETY (PR #4 review, Aayush): the gap before the scale word is BOUNDED: at most 3 spaces/dashes. The old
+# "\s*-?\s*" let the regex engine try every way of splitting a long whitespace run between the two \s*, i.e.
+# quadratic time: "412" + 100k spaces in an attacker's web page would stall the Gate for minutes. "412 million",
+# "412 - million" and "412\nmillion" still match; a scale word more than 3 separator characters away does not.
 _NUMBER = re.compile(
     r"(?<![\w.])"
     r"(?P<int>\d{1,3}(?:\.\d{3}){2,}|\d{1,3}(?:[,_ ]\d{3})+|\d+)"
     r"(?P<frac>\.\d+)?"
     r"(?:e(?P<exp>[+-]?\d{1,2}))?"
-    r"(?:\s*-?\s*(?P<scale>" + _SCALE_ALT + r")\b)?"
+    r"(?:[\s-]{0,3}(?P<scale>" + _SCALE_ALT + r")\b)?"
 )
 
 # "4 1 2 0 0 0 0 0 0": three or more single digits separated by one space/dot/dash/underscore are glued back

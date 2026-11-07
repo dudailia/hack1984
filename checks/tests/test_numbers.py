@@ -40,6 +40,20 @@ class TestAmounts(unittest.TestCase):
         self.assertNotIn(Decimal(10_000_000), parse_amounts("10 merchants"))
         self.assertIn(Decimal(10), parse_amounts("10 merchants"))
 
+    def test_number_followed_by_huge_whitespace_is_fast(self):
+        # PR #4 review (Aayush): "\s*-?\s*" before the scale word backtracked quadratically, so "412" followed by
+        # 100k spaces in an attacker's page (Reader payloads are attacker text) could stall the Gate for minutes.
+        import time
+        for tail in (" " * 100_000 + "x", "\n" * 100_000, " -" * 50_000, "- " * 50_000):
+            t = time.monotonic()
+            parse_amounts("412" + tail)
+            self.assertLess(time.monotonic() - t, 0.5, repr(tail[:6]))
+
+    def test_scale_still_found_after_short_separators(self):
+        for f in ["412 million", "412  million", "412 - million", "412-million", "412\nmillion"]:
+            with self.subTest(form=f):
+                self.assertTrue(has_412m(f), parse_amounts(f))
+
     def test_canon(self):
         self.assertEqual(canon(Decimal("412000000.000")), "412000000")
         self.assertEqual(canon(Decimal("4.60")), "4.6")

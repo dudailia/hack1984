@@ -45,10 +45,14 @@ export_session(sid, ...)     export_bundle, written to bundles/<session_id>.json
 
 REVEAL POLICY
 -------------
-"allowed" (default): every ALLOWED attempt carries reveal {payload, nonce}, so the reader sees each query that
-actually left. Allowed payloads passed every check, so they are public by definition. Blocked attempts are NEVER
-revealed: they are exactly the payloads that would have leaked the secret. Result rows are never revealed either
-(their private columns hold the RESPONSE: web text, not something we sent). "none": no reveals at all.
+"allowed" (default): every CLEAN allowed attempt (decision "allowed" AND rule None) carries reveal {payload, nonce},
+so the reader sees each query that actually left. Those payloads passed every check, so they are public by
+definition. NEVER revealed:
+  - blocked attempts: exactly the payloads that would have leaked the secret;
+  - allowed attempts WITH a rule: in the fake-only baseline modes a leak is sent anyway and recorded with its rule,
+    so the payload is the leaked secret (PR #4 review, Aayush);
+  - result rows: their private columns hold the RESPONSE (web text), not something we sent.
+"none": no reveals at all.
 """
 
 import datetime
@@ -157,13 +161,20 @@ def _now():
 def build_bundle(session_id, rows, reveals, private_key, hashes, exported):
     """
     rows:     the session's ledger rows in seq order, each exactly as FORMATS section 7 (with `hash`)
-    reveals:  {seq: (payload_bytes, nonce_bytes)} for rows to reveal; ignored for anything but allowed attempts
+    reveals:  {seq: (payload_bytes, nonce_bytes)} for rows to reveal; ignored for anything but CLEAN allowed
+              attempts (decision "allowed" AND rule None)
     Returns the canonical bundle bytes.
+
+    Why "rule is None" too (PR #4 review, Aayush): in the fake-only modes (single_agent, compromised, two_minds) the
+    Gate still runs every check but SENDS anyway and records the rule on the row: that is how a baseline leak is
+    counted. Such a row is "allowed" with rule "secret.buyer", and its payload IS the leaked secret. Revealing it would
+    print the deal in plain text in a shareable bundle. So only rows where no check fired are ever revealed.
     """
     out_rows = []
     for r in rows:
         r = dict(r)
-        if r["seq"] in reveals and r["row_type"] == "attempt" and r["decision"] == "allowed":
+        clean_allowed = r["row_type"] == "attempt" and r["decision"] == "allowed" and r.get("rule") is None
+        if r["seq"] in reveals and clean_allowed:
             payload, nonce = reveals[r["seq"]]
             r["reveal"] = {"payload": bytes(payload).decode("utf-8"), "nonce": bytes(nonce).hex()}
         out_rows.append(r)

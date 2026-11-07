@@ -43,6 +43,26 @@ class TestValid(unittest.TestCase):
         raw = TEST_KEY.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
         self.assertEqual(verify_bytes(sample_bundle())["signer_key_sha256"], hashlib.sha256(raw).hexdigest())
 
+    def test_pinned_signer_accepts_our_key_and_rejects_a_reforged_bundle(self):
+        # PR #4 review (Aayush): the verifier trusts the key INSIDE the bundle, so a forger who edits rows, rebuilds
+        # the chain and re-signs with their own key gets VALID. Pinning the expected signer closes that: our key
+        # (raw public key, full fingerprint, or a >= 16-hex fingerprint prefix) passes, any other key fails.
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        good = sample_bundle()
+        fp = verify_bytes(good)["signer_key_sha256"]
+        pub = json.loads(good)["public_key"]
+        for pin in (pub, fp, fp[:16], fp.upper()):
+            with self.subTest(pin=pin[:8]):
+                self.assertTrue(verify_bytes(good, expected_signer=pin)["valid"])
+        forged = sample_bundle(key=Ed25519PrivateKey.generate())       # fully consistent, signed by someone else
+        self.assertTrue(verify_bytes(forged)["valid"])                  # without a pin: VALID (self-attested)
+        r = verify_bytes(forged, expected_signer=fp)
+        self.assertEqual((r["valid"], r["reason"]), (False, "unexpected_signer"))
+
+    def test_pin_too_short_is_rejected(self):
+        with self.assertRaises(ValueError):
+            verify_bytes(sample_bundle(), expected_signer="abcd")
+
     def test_fingerprint_is_null_when_unreadable(self):
         self.assertIsNone(verify_bytes(b"{not json")["signer_key_sha256"])
 
@@ -186,6 +206,12 @@ class TestStandalone(unittest.TestCase):
             self.assertEqual(json.loads(out.stdout)["reason"], "hash_mismatch")
             out = subprocess.run([sys.executable, "-I", VERIFY, bad], capture_output=True, text=True)
             self.assertEqual(out.stdout.strip(), "INVALID: row 3 hash_mismatch")
+            # --pubkey pins the signer: the right fingerprint passes, a wrong one fails with exit 1.
+            out = subprocess.run([sys.executable, "-I", VERIFY, good, "--pubkey", fp], capture_output=True, text=True)
+            self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+            out = subprocess.run([sys.executable, "-I", VERIFY, good, "--pubkey", "0" * 16], capture_output=True,
+                                 text=True)
+            self.assertEqual((out.returncode, out.stdout.strip()), (1, "INVALID: unexpected_signer"))
 
 
 if __name__ == "__main__":

@@ -150,6 +150,22 @@ class TestExport(unittest.TestCase):
             with open(path, "rb") as f:
                 self.assertEqual(f.read(), data)
 
+    def test_recorded_leak_is_never_revealed(self):
+        # PR #4 review (Aayush): in the fake-only modes a leaky query is ALLOWED but recorded with a rule (that is how
+        # a baseline leak is counted, FORMATS section 1). Revealing it would print the secret in the bundle.
+        # Reveal only allowed attempts whose rule is None.
+        from proof.export import attempt_row, build_bundle
+        from proof.tests.helpers import P1, P_CARELESS, TEST_KEY
+        leak = attempt_row(1, "2026-11-07T23:41:07.500Z", SESSION, "baseline", "search", "127.0.0.1:8702",
+                           P_CARELESS, b"\x33" * 32, "allowed", "secret.buyer", "0" * 64)
+        clean = attempt_row(2, "2026-11-07T23:41:08.000Z", SESSION, "baseline", "search", "127.0.0.1:8702",
+                            P1, b"\x11" * 32, "allowed", None, leak["hash"])
+        data = build_bundle(SESSION, [leak, clean], {1: (P_CARELESS, b"\x33" * 32), 2: (P1, b"\x11" * 32)},
+                            TEST_KEY, {}, "2026-11-07T23:41:44.000Z")
+        self.assertTrue(verify_bytes(data)["valid"])
+        self.assertNotIn(b"Ossory", data)
+        self.assertEqual([r["seq"] for r in json.loads(data)["rows"] if "reveal" in r], [2])
+
     def test_reveal_none(self):
         with tempfile.TemporaryDirectory() as d:
             db = os.path.join(d, "doublethink.db")

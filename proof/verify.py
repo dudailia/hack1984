@@ -7,7 +7,10 @@ proof/verify.py: the STANDALONE bundle verifier.
     python3 proof/verify.py BUNDLE.json --json     ->  {"valid":false,"rows_checked":3,"broken_at_seq":3,
                                                         "reason":"hash_mismatch","bundle_head":"...",
                                                         "signer_key_sha256":"<64 hex>"}
-    exit code 0 if valid, 1 if not.
+    python3 proof/verify.py BUNDLE.json --pubkey 3f9a1c0b7d2e4a51
+                                                   ->  also require THIS signer (our published fingerprint);
+                                                       any other key: INVALID: unexpected_signer
+    exit code 0 if valid, 1 if not, 2 for bad usage.
 
 WHY "STANDALONE"
 ----------------
@@ -63,7 +66,8 @@ WHO SIGNED: THE KEY FINGERPRINT
 The signature is checked against the public_key INSIDE the bundle. So VALID means "consistent, and signed by the
 holder of this key", not "signed by us": anyone can rebuild an edited chain and sign it with their own key. To tell
 the two apart, the verifier reports signer_key_sha256 = SHA-256 of the raw 32-byte public key (text output shows the
-first 16 hex characters). We publish our fingerprint (README, results screen); a judge compares the two.
+first 16 hex characters). We publish our fingerprint (README, results screen); a judge compares the two, or passes
+it as --pubkey and the verifier enforces it (step 7, unexpected_signer).
 """
 
 import hashlib
@@ -252,10 +256,33 @@ def key_fingerprint(public_key_hex):
     return hashlib.sha256(bytes.fromhex(public_key_hex)).hexdigest()
 
 
-def verify_bytes(data):
+def _normalise_pin(pin):
+    """Accept the expected signer as the raw public key (64 hex), its full fingerprint (64 hex), or a fingerprint
+    prefix of at least 16 hex characters. Returns lowercase hex. Anything shorter is refused: an 8-character pin
+    could be matched by grinding keys."""
+    p = (pin or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{16,64}", p):
+        raise ValueError("--pubkey must be 16 to 64 hex characters (a key fingerprint or the raw public key)")
+    return p
+
+
+def _step7_expected_signer(b, pin):
+    """Optional: the signer must be the key the verifier was told to expect (published by the team)."""
+    pub = b["public_key"]
+    fp = key_fingerprint(pub)
+    if not (pin == pub or fp.startswith(pin)):
+        raise _Invalid("unexpected_signer", None, len(b["rows"]))
+
+
+def verify_bytes(data, expected_signer=None):
     """Verify bundle bytes. Returns
     {"valid", "rows_checked", "broken_at_seq", "reason", "bundle_head", "signer_key_sha256"}.
-    signer_key_sha256 is reported whenever the bundle's public_key is readable, even if the bundle is INVALID."""
+    signer_key_sha256 is reported whenever the bundle's public_key is readable, even if the bundle is INVALID.
+
+    expected_signer (optional, the CLI's --pubkey): pin WHO must have signed. Without it, VALID only means "consistent
+    and signed by the key inside the bundle", which a forger can re-sign with their own key (PR #4 review, Aayush).
+    With it, any other signer gives INVALID: unexpected_signer. Raises ValueError for a malformed pin."""
+    pin = _normalise_pin(expected_signer) if expected_signer is not None else None
     head = signer = None
     try:
         b = _step1_parse(data)
@@ -267,6 +294,8 @@ def verify_bytes(data):
         _step4_reveals(b)
         _step5_head(b)
         _step6_signature(b)
+        if pin is not None:
+            _step7_expected_signer(b, pin)
     except _Invalid as e:
         return {"valid": False, "rows_checked": e.rows_checked, "broken_at_seq": e.seq, "reason": e.reason,
                 "bundle_head": head, "signer_key_sha256": signer}
@@ -274,22 +303,37 @@ def verify_bytes(data):
             "bundle_head": head, "signer_key_sha256": signer}
 
 
-def verify_file(path):
+def verify_file(path, expected_signer=None):
     try:
         with open(path, "rb") as f:
             data = f.read()
     except OSError:
         return {"valid": False, "rows_checked": 0, "broken_at_seq": None, "reason": "parse_error",
                 "bundle_head": None, "signer_key_sha256": None}
-    return verify_bytes(data)
+    return verify_bytes(data, expected_signer)
+
+
+_USAGE = "usage: python3 proof/verify.py BUNDLE.json [--json] [--pubkey FINGERPRINT_OR_PUBLIC_KEY_HEX]"
 
 
 def main(argv):
-    args = [a for a in argv if a != "--json"]
+    args, pin, i = [], None, 0
+    while i < len(argv):
+        if argv[i] == "--pubkey" and i + 1 < len(argv):
+            pin, i = argv[i + 1], i + 2
+        elif argv[i] == "--json":
+            i += 1
+        else:
+            args.append(argv[i])
+            i += 1
     if len(args) != 1:
-        print("usage: python3 proof/verify.py BUNDLE.json [--json]", file=sys.stderr)
+        print(_USAGE, file=sys.stderr)
         return 2
-    r = verify_file(args[0])
+    try:
+        r = verify_file(args[0], pin)
+    except ValueError as e:
+        print("%s\n%s" % (e, _USAGE), file=sys.stderr)
+        return 2
     if "--json" in argv:
         print(json.dumps(r, sort_keys=True))
     elif r["valid"]:
