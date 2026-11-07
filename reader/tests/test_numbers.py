@@ -13,7 +13,7 @@ class Normalize(unittest.TestCase):
         self.assertEqual(n.normalize("  grew\n 7.4%\t in  2025 "), "grew 7.4% in 2025")
 
     def test_nfkc(self):
-        self.assertEqual(n.normalize("grew ７.４％"), "grew 7.4%")
+        self.assertEqual(n.normalize("grew\u00a0７.４％"), "grew 7.4%")
 
 
 class FindNumbers(unittest.TestCase):
