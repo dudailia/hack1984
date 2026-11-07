@@ -7,10 +7,12 @@ import statistics
 from collections import Counter
 from decimal import Decimal
 
-from reader.numbers import to_decimal
+from reader.numbers import REPLACEMENT, normalize, to_decimal
 
 MULTIPLE_LABELS = {"ev_revenue_multiple": "EV/revenue", "ev_ebitda_multiple": "EV/EBITDA"}
 _FORWARD_RE = re.compile(r"\b(?:projected|forecast|forecasts|expected|expects|expect|will|outlook)\b", re.IGNORECASE)
+_SUBJECT_NUMBER = re.compile(r"[0-9]+(?:[.,][0-9]+)*")
+WITHHELD_SUBJECT = "[subject withheld]"
 _MONEY = {"usd": ("$", ""), "usd_millions": ("$", " million"), "usd_billions": ("$", " billion")}
 
 
@@ -82,19 +84,40 @@ def _need_text(need, items, headline, used):
     return "%s: %s." % (_label(need), "; ".join(parts))
 
 
+def _subject(claim):
+    """The model-written subject, unless it carries a number the quote does not (invariant 8)."""
+    subject, quote = normalize(claim["subject"]), normalize(claim["quote"])
+    if REPLACEMENT in subject or any(n not in quote for n in _SUBJECT_NUMBER.findall(subject)):
+        return WITHHELD_SUBJECT
+    return claim["subject"]
+
+
+def _keys(claim, subject):
+    """A claim repeats an earlier one if any key matches: same subject; same number in the same document; or the
+    same quoted sentence in another document. Stops one number being counted as several companies."""
+    t, p, v = claim["claim_type"], claim["period"], to_decimal(claim["value"])
+    keys = {("number", claim["document_id"], t, p, v), ("quote", normalize(claim["quote"]), t, p, v)}
+    if subject != WITHHELD_SUBJECT:
+        keys.add(("subject", subject.strip().casefold(), t, p))
+    return keys
+
+
 def compose(question, needs, kept, sources):
     """needs: [{"need", "claim_types", "label"?}]; kept: validated claims; sources: {result_id: {url, title}}."""
     buckets = {n["need"]: [] for n in needs}
+    seen = {n["need"]: set() for n in needs}
     for claim in sorted(kept, key=lambda c: c["document_id"]):
         src = sources.get(claim["document_id"])
         need = next((n for n in needs if claim["claim_type"] in n.get("claim_types", [])), None)
         if src is None or need is None:
             continue
         bucket = buckets[need["need"]]
-        key = (claim["subject"].strip().casefold(), claim["claim_type"], claim["period"])
-        if any((i["subject"].strip().casefold(), i["claim_type"], i["period"]) == key for i in bucket):
+        subject = _subject(claim)
+        keys = _keys(claim, subject)
+        if keys & seen[need["need"]]:
             continue
-        bucket.append({"subject": claim["subject"], "claim_type": claim["claim_type"], "value": claim["value"],
+        seen[need["need"]] |= keys
+        bucket.append({"subject": subject, "claim_type": claim["claim_type"], "value": claim["value"],
                        "unit": claim["unit"], "period": claim["period"], "quote": claim["quote"],
                        "source": {"result_id": claim["document_id"], "url": src.get("url"),
                                   "title": src.get("title")}})

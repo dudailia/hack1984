@@ -164,7 +164,7 @@ class Normalisation(unittest.TestCase):
 
     def test_nfkc_on_document_and_quote(self):
         job = fx.page(J01)
-        job["documents"][1]["text"] = "Merchant acquiring revenue grew ７.４％ in 2025, according to the survey."
+        job["documents"][1]["text"] = "Merchant acquiring revenue\u00a0grew ７.４％ in 2025, according to the survey."
         kept, rs = reasons(job, [ACQ])
         self.assertEqual((len(kept), rs), (1, []))
 

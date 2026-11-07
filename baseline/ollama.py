@@ -6,7 +6,7 @@
 import datetime
 import json
 
-from baseline import gate_client, loopback
+from baseline import config, gate_client, loopback
 
 ACTIONS = ["search", "done"]
 ACTION_SCHEMA = {
@@ -56,7 +56,7 @@ def validate_action(action, needs):
 class OllamaClient:
     def __init__(self, port, model, today=None, timeout=300):
         self.port = loopback.check_port(port)
-        self.model = model
+        self.model = config.local_model(model)
         self.today = today
         self.timeout = timeout
 
