@@ -26,7 +26,10 @@ class GateState:
 
     def __init__(self):
         self.next_result_n = 1
-        self.docs = {}  # result_id -> {"url", "title", "content"}
+        self.docs = {}       # result_id -> {"url", "title", "content"}
+        self.query_of = {}   # result_id -> public query of the search that returned it
+        self.extracted = {}  # result_id -> extracted text (capped)
+        self.next_job_n = 1
         self.lock = threading.Lock()
 
 
