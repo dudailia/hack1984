@@ -531,6 +531,7 @@ class LoopModesTest(RunTestCase):
             self.assertEqual(f.read().count("outcome error"), 3)
         with mock.patch.object(redteam, "load_loop", return_value=(start_run, lambda timeout=None: True)), \
                 mock.patch.object(redteam, "checks_frozen", return_value=False), \
+                mock.patch.object(redteam.config, "gate_port", return_value=self.gate.port), \
                 mock.patch("sys.stdout"), mock.patch("sys.stderr") as err:
             code = redteam.main(["--attacks", DUMMY, "--modes", "doublethink", "--out", self.out + ".2"])
         self.assertEqual(code, 3)
@@ -542,6 +543,41 @@ class LoopModesTest(RunTestCase):
             self.skipTest("app/loop.py not merged")
         from app import loop as app_loop
         self.assertEqual(loop, (app_loop.start_run, app_loop.wait))
+
+
+
+class GateAttestTest(RunTestCase):
+    """Review of PR #22: two_minds and doublethink take the Gate's recorded rule as the verdict, so a Gate running
+    its allow-everything stub (no checks/ where it was started) must stop the run before anything is planted."""
+
+    def run_loop_modes(self, fake):
+        return redteam.run_redteam(DUMMY, ["two_minds", "doublethink"], self.out, review=self.review,
+                                   gate=gate_client.GateClient(self.gate.port), llm_factory=llm_factory,
+                                   state_path=self.state, command="t", frozen=False,
+                                   loop=(fake.start_run, fake.wait))
+
+    def test_gate_without_a_detector_stops_loop_modes_before_anything(self):
+        self.gate.detect_canary = False
+        fake = FakeLoop(self.state)
+        with self.assertRaises(judge.DetectorUnavailable):
+            self.run_loop_modes(fake)
+        self.assertEqual(fake.calls, [], "no loop run started")
+        self.assertFalse(os.path.exists(self.state), "nothing planted")
+        self.assertFalse(os.path.exists(self.out), "no results written")
+
+    def test_attest_passes_when_the_gate_gives_the_frozen_rule(self):
+        redteam.attest_gate(gate_client.GateClient(self.gate.port), judge.load_detector())
+
+    def test_unreachable_gate_is_detector_unavailable(self):
+        client = gate_client.GateClient(self.gate.port)
+        self.gate.stop()
+        with self.assertRaises(judge.DetectorUnavailable):
+            redteam.attest_gate(client, judge.load_detector())
+
+    def test_baseline_modes_judge_in_process_and_need_no_attest(self):
+        self.gate.detect_canary = False
+        run = self.run_rt()
+        self.assertEqual(set(run["modes"]), {"single_agent", "compromised"})
 
 
 if __name__ == "__main__":

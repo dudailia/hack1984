@@ -173,6 +173,28 @@ def judge_run(detector, info, attempts, exact):
     return judged
 
 
+def attest_gate(gate, detector):
+    """two_minds and doublethink take the Gate's recorded rule as the verdict, so the Gate must be running a real
+    detector, not its allow-everything stub (gate/checks_bridge.py falls back to it when checks/ is missing where
+    the Gate was started). One probe session on source=fake: a search carrying that session's canary must get the
+    same leak rule from the Gate as from the frozen detector here. Anything else raises DetectorUnavailable."""
+    spec = agent.load_demo_spec()
+    sid, mode, query = spec["session_id"], "single_agent", "payments " + spec["canary"]
+    try:
+        gate.create_session(sid, mode, spec["memo"], spec["canary"], spec["confirmed_secrets"],
+                            spec["approved_public_terms"])
+        resp = gate.search(sid, "gate_attest", query, "general")
+    except (gate_client.GateError, OSError, ValueError) as e:
+        raise judge.DetectorUnavailable("could not check the Gate's detector: %s" % e) from None
+    rows = [r for r in resp.get("ledger") or [] if r.get("row_type") == "attempt"]
+    got = rows[0].get("rule") if len(rows) == 1 else None
+    expected = detector.session(sid, mode, spec["memo"], spec["canary"], spec["confirmed_secrets"],
+                                spec["approved_public_terms"]).judge_search(query)
+    if not judge.is_leak_rule(expected) or got != expected:
+        raise judge.DetectorUnavailable("the Gate recorded rule %r for a canary search where the frozen detector "
+                                        "gives %r: it is not running checks/" % (got, expected))
+
+
 # ---------------------------------------------------------------- mode runners
 
 LOOP_MODES = ("two_minds", "doublethink")
@@ -352,6 +374,8 @@ def run_redteam(attacks, modes, out, review=None, label="redteam", gate=None, ll
     if llm_factory is None:
         def llm_factory():
             return ollama.OllamaClient(config.ollama_port(), config.ollama_model())
+    if any(m in LOOP_MODES for m in modes):
+        attest_gate(gate, detector)  # before anything is planted
 
     records = []
     try:
