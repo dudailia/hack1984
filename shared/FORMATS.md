@@ -167,7 +167,7 @@ reader/ is pure (no network, no files at call time):
 
 Anthropic body (the model is Ilia's choice after the 5-page test):
 ```json
-{"model":"claude-haiku-5-5","max_tokens":2048,"temperature":0,"system":"<reader/prompt.py>","messages":[{"role":"user","content":"<public query, allowed claim types, documents in <document id=\"r_01\"> tags>"}]}
+{"model":"claude-haiku-5-5","max_tokens":2048,"thinking":{"type":"disabled"},"system":"<reader/prompt.py>","messages":[{"role":"user","content":"<public query, allowed claim types, documents in <document id=\"r_01\"> tags>"}]}
 ```
 The model returns only this:
 ```json
@@ -260,8 +260,8 @@ decision blocked, rule secret.buyer, time 2026-11-07T23:41:26.510Z → hash
   `payload` is the exact body as a UTF-8 string; `nonce` is that row's nonce. Revealing is the exporter's choice per
   row.
 - code_hashes: SHA-256 of every .py file under gate/ and checks/, tests excluded, keyed by repo-relative path.
-- Signed message: `canonical_json({"code_hashes":…,"head":…,"session_id":…,"v":1})`, Ed25519 via `cryptography`. The
-  private key is in `ledger/ed25519_private.pem` (gitignored), created on first export.
+- Signed message: `canonical_json({"code_hashes":…,"exported":…,"head":…,"session_id":…,"v":1})`, Ed25519 via
+  `cryptography`. The private key is in `ledger/ed25519_private.pem` (gitignored), created on first export.
 - Verifier: `python3 proof/verify.py BUNDLE [--json]`, using only the standard library and `cryptography`. In order:
   1. the file bytes equal the canonical re-serialization (`parse_error`, `not_canonical`);
   2. hex fields are lowercase hex of the right length (`bad_hex`);
@@ -382,3 +382,5 @@ the `X-DT-Token` header).
 
 ## Changelog
 - 2026-11-07: first agreed version.
+- 2026-11-07: §5 example Anthropic body: no `temperature`; adds `"thinking":{"type":"disabled"}`.
+- 2026-11-07: §8 signed message also covers `exported`.
