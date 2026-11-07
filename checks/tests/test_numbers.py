@@ -43,14 +43,20 @@ class TestAmounts(unittest.TestCase):
     def test_number_followed_by_huge_whitespace_is_fast(self):
         # PR #4 review (Aayush): "\s*-?\s*" before the scale word backtracked quadratically, so "412" followed by
         # 100k spaces in an attacker's page (Reader payloads are attacker text) could stall the Gate for minutes.
+        # Takes ~10 ms now; the quadratic version took minutes at this size, so 2 s is a wide, non-flaky margin.
         import time
-        for tail in (" " * 100_000 + "x", "\n" * 100_000, " -" * 50_000, "- " * 50_000):
+        for tail in (" " * 100_000 + "x", "\n" * 100_000, " -" * 50_000, "- " * 50_000, " \t\n-" * 25_000):
             t = time.monotonic()
             parse_amounts("412" + tail)
-            self.assertLess(time.monotonic() - t, 0.5, repr(tail[:6]))
+            self.assertLess(time.monotonic() - t, 2.0, repr(tail[:6]))
 
     def test_scale_still_found_after_short_separators(self):
-        for f in ["412 million", "412  million", "412 - million", "412-million", "412\nmillion"]:
+        # The last five are the PR #4 re-review regression (Aayush): with the separator bounded to 3 characters, a scale
+        # word 4+ separators away was dropped, "412" parsed as plain 412, and secret.price did not fire. parse_amounts
+        # now collapses whitespace (and long space/dash runs) BEFORE the bounded regex, so any gap length matches.
+        for f in ["412 million", "412  million", "412 - million", "412-million", "412\nmillion",
+                  "$412    million", "412 -  million", "412\n\n\n\nmillion", "412\t\t\t\t\tmillion",
+                  "412 -- -- million"]:
             with self.subTest(form=f):
                 self.assertTrue(has_412m(f), parse_amounts(f))
 

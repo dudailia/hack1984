@@ -71,7 +71,9 @@ class TestPrice(unittest.TestCase):
         for f in ["$412 million", "412m", "$412M", "412,000,000", "412000000", "0.412bn", "$0.412 billion",
                   "412 mln", "four hundred twelve million", "four hundred and twelve million", "4.12e8",
                   "412 000 000", "412,000 thousand", "USD 412mm", "noillim 214$", b64("$412 million"),
-                  pct("$412 million"), "4 1 2 million"]:
+                  pct("$412 million"), "4 1 2 million",
+                  # PR #4 re-review: long gaps before the scale word must still be the price
+                  "$412    million", "412 -  million", "412\n\n\n\nmillion"]:
             with self.subTest(form=f):
                 self.assertEqual(rule("payments deal " + f), "secret.price")
 

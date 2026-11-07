@@ -45,8 +45,8 @@ _SCALE_ALT = "|".join(sorted(map(re.escape, _SCALES), key=len, reverse=True))
 #
 # SAFETY (PR #4 review, Aayush): the gap before the scale word is BOUNDED: at most 3 spaces/dashes. The old
 # "\s*-?\s*" let the regex engine try every way of splitting a long whitespace run between the two \s*, i.e.
-# quadratic time: "412" + 100k spaces in an attacker's web page would stall the Gate for minutes. "412 million",
-# "412 - million" and "412\nmillion" still match; a scale word more than 3 separator characters away does not.
+# quadratic time: "412" + 100k spaces in an attacker's web page would stall the Gate for minutes. Longer gaps
+# ("$412    million", "412\n\n\n\nmillion") are first shrunk by _collapse_gaps() in parse_amounts, so they still match.
 _NUMBER = re.compile(
     r"(?<![\w.])"
     r"(?P<int>\d{1,3}(?:\.\d{3}){2,}|\d{1,3}(?:[,_ ]\d{3})+|\d+)"
@@ -104,9 +104,28 @@ def _word_numbers(text):
     return found
 
 
+_WHITESPACE_RUN = re.compile(r"\s+")
+_SPACE_DASH_RUN = re.compile(r"[ -]{4,}")
+
+
+def _collapse_gaps(t):
+    """Shrink every gap so the BOUNDED scale separator in _NUMBER ([\\s-]{0,3}) can still reach the scale word.
+
+    1. any run of whitespace (spaces, tabs, newlines) -> one space:   "412\\n\\n\\n\\nmillion" -> "412 million"
+    2. any remaining run of 4+ spaces/dashes          -> " - ":       "412 -- -- million"  -> "412 - million"
+    Both are single-pass, character-class regexes (no nesting, no alternation): linear time, so hostile input
+    cannot make them slow. Step 2 only fires on 4+ characters, so ordinary "5 - 100" and "2025-2030" are unchanged.
+
+    Why this exists (PR #4 re-review, Aayush): bounding the separator fixed the quadratic backtracking, but on its
+    own it made "$412    million" parse as plain 412, so secret.price did not fire. Collapsing first restores the
+    old "any gap" behaviour while keeping the regex linear.
+    """
+    return _SPACE_DASH_RUN.sub(" - ", _WHITESPACE_RUN.sub(" ", t))
+
+
 def parse_amounts(text):
     """Every numeric value in text, as Decimal. Duplicates are fine; callers use set membership."""
-    t = _glue_spaced_digits(fold(text))
+    t = _glue_spaced_digits(_collapse_gaps(fold(text)))
     out = []
     for m in _NUMBER.finditer(t):
         digits = re.sub(r"[,_ .]", "", m.group("int"))
