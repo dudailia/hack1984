@@ -1,18 +1,18 @@
 # Doublethink: team brief (HACK1984, Sat Nov 7)
 
-Team: Ilia, Aayush, Anand, Sharon.
+Team: Ilia, Aayush, Anant, Sheara.
 
 ## 0. How each person starts (do this once)
 1. Accept Ilia's GitHub invite, clone the repo, set up (section 8).
 2. Open a terminal **inside the repo folder** and start Claude Code there (`claude`). Not a claude.ai chat: Claude
    Code in the repo reads CLAUDE.md automatically and can open every file in notes/.
 3. First message to Claude Code:
-   > Read CLAUDE.md, notes/TEAM_BRIEF.md and my personal file notes/[AAYUSH.md | ANAND.md | ILIA.md |
-   > SHARON_UI.md]. I am [name]. Explain my job back to me in 5 lines, then tell me exactly what to do in the
+   > Read CLAUDE.md, notes/TEAM_BRIEF.md and my personal file notes/[AAYUSH.md | ANANT.md | ILIA.md |
+   > SHEARA_UI.md]. I am [name]. Explain my job back to me in 5 lines, then tell me exactly what to do in the
    > next hour. Plan mode, no code until shared/FORMATS.md is committed.
-4. Then paste your prompt from section 11 (Sharon: the prompts in SHARON_UI.md).
+4. Then paste your prompt from section 11 (Sheara: the prompts in SHEARA_UI.md).
 
-Files in notes/: TEAM_BRIEF (this), personal files (AAYUSH, ANAND, ILIA, SHARON_UI), SPEC, INTERFACES,
+Files in notes/: TEAM_BRIEF (this), personal files (AAYUSH, ANANT, ILIA, SHEARA_UI), SPEC, INTERFACES,
 THREAT_MODEL, DEMO, PITCH, RESEARCH, BENIGN, ATTACKS_HASH.
 
 ---
@@ -116,7 +116,7 @@ EV/revenue. The research question is about public sector facts, so live Tavily r
 
 Ilia wrote 40 attack payloads on Friday, before any code, and fixed their SHA-256:
 `961d23204616ac8cd91b303bd847029e9db84ca3a5f73c379fea20333c41d1be`.
-The file is **not** in the repo. Whoever builds the checks (Anand) does not see it until the checks are frozen at
+The file is **not** in the repo. Whoever builds the checks (Anant) does not see it until the checks are frozen at
 a tagged commit. Ilia never writes or suggests check logic, because he knows the attacks. This is a
 pre-registered test: it answers "did you tune on your test set?"
 
@@ -136,9 +136,9 @@ Rules: teams of 4 max; open-source code is fine, other pre-written code is not; 
 | Person | Folder(s) | Owns |
 |---|---|---|
 | **Aayush** | `gate/`, `planner/`, `app/run.py` | Gate (only network process, allowlist, Tavily search and extract, log before send, result ids), Planner on Ollama, the run loop that connects everything and emits events for the UI |
-| **Anand** | `checks/`, `proof/` | The four gate checks (tests first), false-block run on the 30 normal questions, signed bundle and standalone verifier |
+| **Anant** | `checks/`, `proof/` | The four gate checks (tests first), false-block run on the 30 normal questions, signed bundle and standalone verifier |
 | **Ilia** | `reader/`, `baseline/`, `fake_tavily/` | Reader (builds the Claude request; the Gate sends it), Validator, Composer, single-agent baseline and compromised mode, fake Tavily with the poisoned page. Plus pitch, sponsor fair at 13:00, submission, red team after the checks freeze |
-| **Sharon** | `ui/` | The local web page: memo panel, live log, answer with sources, toggle single agent vs Doublethink, verify proof button. Plus demo timing, the backup video, and README screenshots |
+| **Sheara** | `ui/` | The local web page: memo panel, live log, answer with sources, toggle single agent vs Doublethink, verify proof button. Plus demo timing, the backup video, and README screenshots |
 
 Shared files nobody edits alone: `shared/FORMATS.md` (the data formats) and `CLAUDE.md`. Change them only after
 telling the group chat.
@@ -149,7 +149,7 @@ telling the group chat.
 
 **Ilia owns the repo.** At 11:00 exactly:
 1. Ilia creates a **private** repo `hack1984` on GitHub, pushes CLAUDE.md, `.claude/settings.json`, `.gitignore`
-   and `notes/` (without ATTACKS.md), then adds Aayush, Anand and Sharon as collaborators (Settings, Collaborators).
+   and `notes/` (without ATTACKS.md), then adds Aayush, Anant and Sheara as collaborators (Settings, Collaborators).
 2. Everyone accepts the invite (email or github.com/notifications), then:
 
         git clone https://github.com/dudailia/hack1984.git
@@ -190,7 +190,7 @@ Rules:
 | 12:00 | Lunch: eat at the laptop, keep going. |
 | 13:00 to 14:00 | Ilia at the sponsor fair. Others keep building. |
 | 14:00 to 18:00 | Workshops (Curry 342 to 346). Only go if your part is on track; see your personal file. Check in at each for the $400 Big Brother award. |
-| 17:00 | Anand freezes checks, tags the commit. |
+| 17:00 | Anant freezes checks, tags the commit. |
 | 19:00 | Dinner. |
 | 19:00 to 21:00 | Integration: one full run end to end. |
 | **21:00** | **MVP: demo runs start to finish. If not, cut from the list below.** |
@@ -207,8 +207,8 @@ only), Ed25519 signature (keep hash chain). **Never cut:** the before/after demo
 
 ```
 Read CLAUDE.md, notes/TEAM_BRIEF.md, notes/SPEC.md, notes/INTERFACES.md and notes/THREAT_MODEL.md.
-We are four people with these folders: Aayush gate/ planner/ app/; Anand checks/ proof/;
-Ilia reader/ baseline/ fake_tavily/; Sharon ui/.
+We are four people with these folders: Aayush gate/ planner/ app/; Anant checks/ proof/;
+Ilia reader/ baseline/ fake_tavily/; Sheara ui/.
 1. List anything ambiguous or contradictory in the notes.
 2. Propose the exact file layout per folder.
 3. Write shared/FORMATS.md: exact JSON for the research request, gate response, reading job, claim,
@@ -248,7 +248,7 @@ Build in this order, tests first, each step green before the next:
 3. Tavily search and extract over plain HTTPS with the options in SPEC.md (topic finance, search_depth
    basic, max_results 10, include_domains prefer, include_usage). Return opaque result ids to the Planner,
    never URLs, titles or snippets.
-4. A check hook: call checks.run_all(payload, session) before every send. Until Anand's module lands, use
+4. A check hook: call checks.run_all(payload, session) before every send. Until Anant's module lands, use
    a stub that allows everything, clearly marked.
 5. planner/: talks to Ollama on localhost:11434, JSON output only. Inputs: memo, question, typed fields.
    It must never receive web text; add a test that fails if any string from a fetched document reaches it.
@@ -259,7 +259,7 @@ Make one real Tavily call at the end of step 3 and show me the ledger row and cr
 After each step: say what changed, what is stubbed, and what to tell the group chat.
 ```
 
-### Anand: Gate checks, proof
+### Anant: Gate checks, proof
 
 **Your job:** the second layer and the proof. Tests first, always. You do **not** see ATTACKS.md until you freeze
 the checks at 17:00 and tag the commit. **Done means:** `checks.run_all(payload, session)` that blocks the
@@ -267,7 +267,7 @@ confirmed secrets in every listed form, false blocks measured on the 30 normal q
 rejects any one-byte edit.
 
 ```
-Read CLAUDE.md, notes/TEAM_BRIEF.md, notes/SPEC.md, notes/BENIGN.md and shared/FORMATS.md. I am Anand.
+Read CLAUDE.md, notes/TEAM_BRIEF.md, notes/SPEC.md, notes/BENIGN.md and shared/FORMATS.md. I am Anant.
 I own checks/ and proof/. Do not edit other folders. Do not look for an attack file: it is held back on
 purpose until my checks are frozen.
 Build in this order, tests before each rule:
@@ -317,7 +317,7 @@ Build in this order, tests first:
 After each step: say what changed and what to tell the group chat.
 ```
 
-### Sharon: UI and demo
+### Sheara: UI and demo
 
 **Your job:** the screen the judges watch for three minutes. Build against the recorded fake run
 (`shared/fixtures/demo_events.jsonl`) first, so you never wait on the backend; switch to the live stream at
@@ -325,7 +325,7 @@ After each step: say what changed and what to tell the group chat.
 sources, and "verify proof" shows VALID, then INVALID after a one-byte edit.
 
 ```
-Read CLAUDE.md, notes/TEAM_BRIEF.md, notes/DEMO.md and shared/FORMATS.md. I am Sharon. I own ui/.
+Read CLAUDE.md, notes/TEAM_BRIEF.md, notes/DEMO.md and shared/FORMATS.md. I am Sheara. I own ui/.
 Do not edit other folders.
 Build a single static page (HTML, CSS, plain JavaScript, no CDN, no framework, no external fonts) served
 on loopback:

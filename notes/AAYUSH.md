@@ -10,7 +10,7 @@ Build the only door to the internet, and the mind that holds the secret. Everyon
 - **By 13:00:** the Gate makes one real Tavily search and writes a ledger row before sending. Post a screenshot of
   the row in the group chat.
 - **By 17:00:** the Planner runs on Ollama and produces valid research requests from the memo.
-- **By 21:00:** `app/run.py` runs the full loop end to end and streams UI events to Sharon's page.
+- **By 21:00:** `app/run.py` runs the full loop end to end and streams UI events to Sheara's page.
 If you slip, say so in the group chat immediately. Ilia checks in with you at 12:30.
 
 ## What you build
@@ -22,7 +22,7 @@ If you slip, say so in the group chat immediately. Ilia checks in with you at 12
   ledger it as blocked.
 - Order for every outbound request, never changed: build payload, call `checks.run_all(payload, session)`, write
   ledger row (status sent or blocked, rule), then send only if allowed, then update the row with the result
-  (or write a result row: agree with Anand which).
+  (or write a result row: agree with Anant which).
 - Result ids: keep a session map `result_id -> url, title, content` inside the Gate. The Planner gets ids only.
   Extract accepts only ids this session returned.
 - Tavily details (see notes/RESEARCH.md): POST https://api.tavily.com/search with `Authorization: Bearer <key>`.
@@ -35,7 +35,7 @@ If you slip, say so in the group chat immediately. Ilia checks in with you at 12
 ### 2. Ledger (SQLite, append only)
 Row: seq, time, session, component (planner, reader, baseline), destination host, exact payload bytes, byte
 length, status (sent, blocked, error), rule, prev_hash, hash = SHA-256(prev_hash + canonical JSON of the row).
-Test: there is no function that sends without first writing a row. Anand builds the bundle and verifier on top
+Test: there is no function that sends without first writing a row. Anant builds the bundle and verifier on top
 of your table, so agree the canonical form with him by 12:30.
 
 ### 3. Audit hook (invariant 1)
@@ -57,21 +57,21 @@ Test: the Planner process cannot open a connection to any outside host.
 ### 5. app/run.py
 - Loop: Planner -> Gate -> Reader job via Gate -> Ilia's Validator -> typed fields -> Planner, until done or the
   session budget (calls and credits) runs out. Then Ilia's Composer.
-- Emits UI events (names in shared/FORMATS.md) over Server-Sent Events on loopback for Sharon.
+- Emits UI events (names in shared/FORMATS.md) over Server-Sent Events on loopback for Sheara.
 - One command for the demo: memo file, question, mode (doublethink, single, compromised).
 
 ## Who you depend on, who depends on you
 | You need | From | Fallback until it lands |
 |---|---|---|
-| `checks.run_all` | Anand | stub that allows everything, loudly marked |
+| `checks.run_all` | Anant | stub that allows everything, loudly marked |
 | Reader request builder, Validator, Composer | Ilia | stub returning a fixed claim |
-| UI | Sharon | print events to the terminal |
+| UI | Sheara | print events to the terminal |
 
 | Needs you | What |
 |---|---|
-| Anand | ledger table and canonical row form |
+| Anant | ledger table and canonical row form |
 | Ilia | Gate endpoint for Reader jobs, fake Tavily wiring for baseline |
-| Sharon | SSE stream with the agreed event names |
+| Sheara | SSE stream with the agreed event names |
 
 ## Tests you own
 No send without a row; non-allowlisted host refused and ledgered; Planner never sees web text; non-Gate process

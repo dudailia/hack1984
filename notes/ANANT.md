@@ -1,4 +1,4 @@
-# Anand: Gate checks and proof
+# Anant: Gate checks and proof
 
 Read notes/TEAM_BRIEF.md first. Your Claude Code prompt is in TEAM_BRIEF.md section 11. This file is the detail
 behind it.
@@ -61,8 +61,8 @@ both numbers.
 
 ## Who you depend on, who depends on you
 - You need from Aayush: the ledger table and where `run_all` is called.
-- Aayush needs `run_all` (he uses a stub until yours lands). Sharon needs proof results as events.
-- Your false-block number goes into `shared/results/results.json` for Sharon's results screen.
+- Aayush needs `run_all` (he uses a stub until yours lands). Sheara needs proof results as events.
+- Your false-block number goes into `shared/results/results.json` for Sheara's results screen.
 
 ## Workshop
 "Privacy and Security in Data and AI" at 15:00, Curry 346. Optional; only if your checks are on track.

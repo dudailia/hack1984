@@ -93,4 +93,4 @@ UI running the demo.
 UI polish; full attack and false-block numbers; macOS sandbox; MCP server version.
 
 ## Team split
-See notes/TEAM_BRIEF.md section 7 and the personal files (AAYUSH.md, ANAND.md, ILIA.md, SHARON_UI.md).
+See notes/TEAM_BRIEF.md section 7 and the personal files (AAYUSH.md, ANANT.md, ILIA.md, SHEARA_UI.md).

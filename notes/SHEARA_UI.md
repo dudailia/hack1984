@@ -1,4 +1,4 @@
-# Sharon: UI and demo guide (Doublethink, HACK1984)
+# Sheara: UI and demo guide (Doublethink, HACK1984)
 
 Read TEAM_BRIEF.md first. This doc covers only your part: the screen the judges watch for three minutes.
 No code before 11:00. Installing skills before 11:00 is fine (it is setup, not code).
@@ -60,7 +60,7 @@ A "Tamper one byte" button edits one row; verify again and the chain breaks at t
 
 **Results screen (last 30 seconds of the demo):** one view, four bars: leaks out of 40 attacks for single agent,
 compromised agent, two minds, two minds plus gate. Below: false blocks on 30 normal questions. Numbers come from a
-JSON file Anand and Ilia produce; never type a number by hand.
+JSON file Anant and Ilia produce; never type a number by hand.
 
 ---
 
@@ -107,15 +107,15 @@ After installing, start Claude Code from the repo folder and ask: "Which skills 
 ## 5. Your build order and prompts
 
 Model: Opus 5.5, high effort. Plan mode first for every prompt, then approve. Work only in `ui/`, on your branch
-`sharon`. Merge to main at least every 2 hours. Wait for `shared/FORMATS.md` and
+`sheara`. Merge to main at least every 2 hours. Wait for `shared/FORMATS.md` and
 `shared/fixtures/demo_events.jsonl` (about 11:45) before step 2.
 
 ### Step 1 (11:15, plan mode only): design system
 
 ```
-Read CLAUDE.md, notes/TEAM_BRIEF.md, notes/SHARON_UI.md and notes/DEMO.md. I am Sharon and I own ui/
+Read CLAUDE.md, notes/TEAM_BRIEF.md, notes/SHEARA_UI.md and notes/DEMO.md. I am Sheara and I own ui/
 only. Use the frontend-design and motion-design skills.
-Write ui/DESIGN.md: the design direction "two rooms and a wall" from SHARON_UI.md section 2, adapted
+Write ui/DESIGN.md: the design direction "two rooms and a wall" from SHEARA_UI.md section 2, adapted
 to the HACK1984 look (black, off-white, one red, monospace). Include: color tokens with the rule that red
 means only leak or block and the calm color means only verified or allowed; type scale readable on a
 projector at 1280x720 (nothing below 16px); spacing scale; layout for both modes; every motion from
@@ -189,5 +189,5 @@ the line to say, and time left. Then record the full run as the backup video.
 
 ## 7. Who to talk to
 - Event names or formats wrong: Aayush (he owns app/run.py) and the group chat.
-- Results numbers: Anand (false blocks) and Ilia (attack numbers).
+- Results numbers: Anant (false blocks) and Ilia (attack numbers).
 - What the demo says and when: Ilia.

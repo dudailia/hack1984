@@ -5,7 +5,7 @@ web text. The Reader reads web text and never sees the memo. The Gate is the onl
 every outbound payload is checked, ledgered before sending, and exportable as a signed bundle.
 
 Team of four, one folder each. Start every session by reading notes/TEAM_BRIEF.md and the personal file of the
-person you are working for: notes/AAYUSH.md, notes/ANAND.md, notes/ILIA.md or notes/SHARON_UI.md.
+person you are working for: notes/AAYUSH.md, notes/ANANT.md, notes/ILIA.md or notes/SHEARA_UI.md.
 Spec: notes/SPEC.md. Interfaces: notes/INTERFACES.md, then shared/FORMATS.md once it exists (FORMATS.md wins).
 Threat model: notes/THREAT_MODEL.md. Demo: notes/DEMO.md.
 
@@ -17,8 +17,8 @@ Threat model: notes/THREAT_MODEL.md. Demo: notes/DEMO.md.
 - Never run `/add-dir` on another folder. Work only inside this repo.
 
 ## Ownership
-- Aayush: gate/, planner/, app/. Anand: checks/, proof/. Ilia: reader/, baseline/, fake_tavily/.
-  Sharon: ui/. Shared: shared/ (change only after telling the group chat).
+- Aayush: gate/, planner/, app/. Anant: checks/, proof/. Ilia: reader/, baseline/, fake_tavily/.
+  Sheara: ui/. Shared: shared/ (change only after telling the group chat).
 - Only edit the folders of the person you are working for. If you need something from another folder, write a
   clearly marked stub and say what the owner must provide.
 

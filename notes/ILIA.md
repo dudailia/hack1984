@@ -9,7 +9,7 @@ submission.
 
 ## The one rule about you
 You wrote notes/ATTACKS.md. **Never write, review or suggest anything in checks/.** Keep ATTACKS.md out of the repo
-until Anand tags `checks-frozen`.
+until Anant tags `checks-frozen`.
 
 ## Code you build
 
@@ -43,7 +43,7 @@ through it.
 
 ## Non-code work (this is half your job)
 
-**Repo (11:00 to 11:30):** create the private repo, push the starter kit, invite Aayush, Anand and Sharon, run the
+**Repo (11:00 to 11:30):** create the private repo, push the starter kit, invite Aayush, Anant and Sheara, run the
 planning prompt (TEAM_BRIEF.md section 10). Add to it: "Also create shared/fixtures/results_example.json in the
 format of the results screen."
 
