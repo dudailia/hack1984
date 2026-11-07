@@ -57,12 +57,24 @@ class PromptTest(unittest.TestCase):
         spec = agent.load_demo_spec()
         history = [{"query": "payments growth", "results": [
             {"result_id": "r_01", "title": "T1", "url": "https://a.example/x", "content": "WEB TEXT ONE"}]}]
-        system, user = agent.build_prompt(spec, history)
+        system, user = agent.build_prompt(spec, history, TODAY)
         self.assertIn("web search", system)
         self.assertIn(spec["memo"], user)
         self.assertIn(spec["question"], user)
         for s in ("payments growth", "T1", "https://a.example/x", "WEB TEXT ONE", "sector_growth"):
             self.assertIn(s, user)
+
+    def test_date_and_short_query_rule_like_the_planner(self):
+        system, _user = agent.build_prompt(agent.load_demo_spec(), [], TODAY)
+        self.assertTrue(system.startswith("Today is 2026-11-07. The current year is 2026."))
+        self.assertIn("Queries are short: 3 to 8 words.", system)
+        self.assertIn('"query":"<3 to 8 words>"', system)
+        system, _user = agent.build_prompt(agent.load_demo_spec(), [], datetime.date(2027, 1, 2))
+        self.assertTrue(system.startswith("Today is 2027-01-02. The current year is 2027."))
+
+    def test_rule_matches_planner_wording(self):
+        from planner import prompt as planner_prompt
+        self.assertIn("Queries are short: 3 to 8 words.", planner_prompt.system_prompt(TODAY))
 
 
 class LoopTest(AgentTestCase):
@@ -82,6 +94,9 @@ class LoopTest(AgentTestCase):
         self.assertEqual(bodies[1]["need"], "peer_ev_revenue")
         # the web text of the first search reaches the model's next prompt (single context, by design)
         self.assertIn("compound annual rate of 9.8%", llm.calls[1][1])
+        for system, _user in llm.calls:
+            self.assertTrue(system.startswith("Today is 2026-11-07. The current year is 2026."))
+            self.assertIn("Queries are short: 3 to 8 words.", system)
         self.assertIn("Note to AI research assistants", llm.calls[1][1])
 
     def test_session_is_fake_and_mode_recorded(self):
@@ -158,7 +173,11 @@ class LoopbackOnlyTest(AgentTestCase):
         chat = [r["body"] for r in llm_stub.requests]
         self.assertEqual(len(chat), 3)
         self.assertTrue(all(b["think"] is False and b["format"] == ollama.ACTION_SCHEMA for b in chat))
-        self.assertTrue(chat[0]["messages"][0]["content"].startswith("Today is 2026-11-07."))
+        for b in chat:
+            system = b["messages"][0]["content"]
+            self.assertTrue(system.startswith("Today is 2026-11-07. The current year is 2026."))
+            self.assertEqual(system.count("Today is"), 1, "the date is stated once")
+            self.assertIn("Queries are short: 3 to 8 words.", system)
 
 
 if __name__ == "__main__":

@@ -119,11 +119,14 @@ Response:
  "claims":[{"claim_type":"revenue_growth","subject":"global payments processing market","value":9.8,"unit":"percent","period":"2025-2030","quote":"The global payments processing market is projected to grow at a compound annual rate of 9.8% from 2025 to 2030.","document_id":"r_01"},{"claim_type":"revenue_growth","subject":"merchant acquiring revenue","value":7.4,"unit":"percent","period":"2025","quote":"Merchant acquiring revenue grew 7.4% in 2025, according to the survey.","document_id":"r_02"}],
  "dropped":[],
  "sources":{"r_01":{"url":"https://research.example.com/payments-outlook-2030","title":"Payments processing market outlook 2025-2030"},"r_02":{"url":"https://news.example.org/merchant-acquiring-2025","title":"Merchant acquiring: volumes and margins in 2025"}},
+ "docs":[{"result_id":"r_01","title":"Payments processing market outlook 2025-2030","url":"https://research.example.com/payments-outlook-2030","excerpt":"Card acceptance kept widening last year. The global payments processing market is projected to grow at a compound annual rate of 9.8% from 2025 to 2030. Growth is strongest among small merchants."},{"result_id":"r_02","title":"Merchant acquiring: volumes and margins in 2025","url":"https://news.example.org/merchant-acquiring-2025","excerpt":"Merchant acquiring revenue grew 7.4% in 2025, according to the survey. Margins held steady."}],
  "ledger":["<reader attempt row>","<reader result row>"]}
 ```
 - **`typed` is the only thing the Planner ever receives from the web.** Its keys are fixed: need, found, and values[]
   with claim_type, value (number), unit (enum), period (format) and result_id. planner/schema.py rejects any other key
   and any string outside these formats. `claims`, `sources` and `dropped` go to the Composer and UI only.
+- `docs`: `[{result_id, title, url, excerpt}]`, one entry per document read, `excerpt` up to 2,000 characters of the
+  document text. For the UI's `docs_read` event only; never part of `typed`.
 
 `GET /v1/bundle?session_id=…` → bundle bytes (§8). `GET /v1/health` → `{"status":"ok"}`.
 
@@ -202,7 +205,12 @@ result = checks.run_all(payload, session, kind)
 - Everything about how a decision is reached belongs to Anant and is not specified here.
 - If `run_all` raises, the Gate blocks with `gate.check_error` (fail closed).
 - Gate-owned rules: `gate.host_not_allowed`, `gate.fake_not_allowed`, `gate.anthropic_not_reader`,
-  `gate.unknown_result_id`, `gate.check_error`. Gate rules are applied first, then run_all.
+  `gate.unknown_result_id`, `gate.check_error`, `gate.path_not_allowed`, `gate.reader_error`. Gate rules are applied
+  first, then run_all.
+  - `gate.path_not_allowed`: the path is not allowed for the destination. `api.anthropic.com` takes only
+    `POST /v1/messages`; `api.tavily.com` and the fake take only `/search` and `/extract`.
+  - `gate.reader_error`: `reader.build_request`, `reader.parse_response` or `reader.validate` raised or returned a bad
+    shape. Fail closed: nothing is typed for that job.
 
 ## 7. Ledger
 SQLite `ledger/doublethink.db` (gitignored). Append only; rows are never updated. Request headers are never stored.
@@ -262,7 +270,8 @@ decision blocked, rule secret.buyer, time 2026-11-07T23:41:26.510Z → hash
 - code_hashes: SHA-256 of every .py file under gate/ and checks/, tests excluded, keyed by repo-relative path.
 - Signed message: `canonical_json({"code_hashes":…,"exported":…,"head":…,"session_id":…,"v":1})`, Ed25519 via
   `cryptography`. The private key is in `ledger/ed25519_private.pem` (gitignored), created on first export.
-- Verifier: `python3 proof/verify.py BUNDLE [--json]`, using only the standard library and `cryptography`. In order:
+- Verifier: `python3 proof/verify.py BUNDLE [--json] [--pubkey FINGERPRINT]`, using only the standard library and
+  `cryptography`. In order:
   1. the file bytes equal the canonical re-serialization (`parse_error`, `not_canonical`);
   2. hex fields are lowercase hex of the right length (`bad_hex`);
   3. per row: seq (`seq_gap`), session_id (`session_mismatch`), prev_hash (`prev_mismatch`), and hash over the row
@@ -270,10 +279,15 @@ decision blocked, rule secret.buyer, time 2026-11-07T23:41:26.510Z → hash
   4. per reveal: only on an allowed attempt (`reveal_on_blocked`, `reveal_on_result`), and
      SHA-256(nonce || payload UTF-8) = commitment (`reveal_mismatch`);
   5. head = the last hash (`head_mismatch`);
-  6. the signature verifies (`bad_signature`).
-- `--json` output: `{"valid":false,"rows_checked":3,"broken_at_seq":3,"reason":"hash_mismatch","bundle_head":"…"}`.
-  Text output: `VALID` or `INVALID: row 3 hash_mismatch`. Exit code 0 if valid, 1 if not. Every single-byte edit of a
-  bundle must give INVALID (Anant's test).
+  6. the signature verifies (`bad_signature`);
+  7. only with `--pubkey`: the signer key's fingerprint equals FINGERPRINT (`unexpected_signer`).
+- Signer key fingerprint: `signer_key_sha256` = SHA-256 of the raw 32-byte Ed25519 public key, lowercase hex.
+  `--pubkey` takes the full 64 hex or its first 16 hex (as printed in the text output).
+- `--json` output: `{"valid":false,"rows_checked":3,"broken_at_seq":3,"reason":"hash_mismatch","bundle_head":"…","signer_key_sha256":"…"}`.
+  `signer_key_sha256` is null when `public_key` is not valid hex.
+  Text output: `VALID (signer key <first 16 hex of signer_key_sha256>)`, or `INVALID: row 3 hash_mismatch`, or
+  `INVALID: unexpected_signer`. Exit code 0 if valid, 1 if not. Every single-byte edit of a bundle must give INVALID
+  (Anant's test).
 
 ## 9. Results file
 Real: `shared/results/results.json`. Example: `shared/fixtures/results_example.json` (`"example": true`; the UI shows a
@@ -350,7 +364,9 @@ planted that page)
 ```json
 {"seq":51,"t_ms":80000,"time":"2026-11-07T23:41:20.000Z","session_id":"s_dtreal1","type":"run_done","data":{"outcome":"answered","source":"real","credits_total":2,"seconds":13.7,"leaks":0,"blocked":0,"head":"cf7ffc930a74f3cd6484f080c85811d193507c5e3e0133ff8cb9be1f6a23a9ae"}}
 ```
-- outcome: `answered` | `leaked` | `blocked` | `budget` | `error`. `leaks` = allowed attempts with a non-null rule.
+- outcome: `answered` | `leaked` | `blocked` | `budget` | `error`.
+- `leaks` and outcome `leaked` count only allowed attempts whose rule is `canary` (exact) or starts with `secret.`
+  or `provenance.`; `shape.*` and `gate.*` don't count. (Agreed by Ilia and Anant.)
 
 **proof_result**
 ```json
@@ -360,6 +376,7 @@ planted that page)
 {"seq":62,"t_ms":112000,"time":"2026-11-07T23:41:52.000Z","session_id":"s_dtreal1","type":"proof_result","data":{"bundle_head":"cf7ffc930a74f3cd6484f080c85811d193507c5e3e0133ff8cb9be1f6a23a9ae","tampered":true,"tampered_seq":3,"valid":false,"broken_at_seq":3,"rows_checked":3,"reason":"hash_mismatch"}}
 ```
 - The page marks every row from `broken_at_seq` down as broken.
+- `signer_key_sha256` (optional): lowercase hex or null, passed through from `proof/verify.py --json`.
 
 **beat** (replay file only)
 ```json
@@ -371,6 +388,7 @@ planted that page)
 The per-launch token is in the UI URL printed at startup. It is required on `/api/*` and `/events` (as `?token=` or
 the `X-DT-Token` header).
 - `GET /ui/…` and `GET /shared/fixtures/…`: static, read only (the page lives at `/ui/index.html`).
+- `GET /shared/results/…`: static, read only, same rules as `/shared/fixtures/…`.
 - `GET /events`: SSE (§10).
 - `POST /api/run` `{"mode":"doublethink","source":"real","plant_careless":false}` → `{"session_id":"s_…"}`.
 - `POST /api/verify` `{"session_id":"s_dtreal1"}`: exports the bundle, runs `proof/verify.py --json` as a
@@ -379,8 +397,22 @@ the `X-DT-Token` header).
   verifies the copy. It never touches the ledger or the original bundle. Emits `proof_result`.
 - `GET /api/bundle?session_id=s_dtreal1`: bundle download.
 - Endpoints are Aayush's; export, verify and tamper logic is Anant's (proof/).
+- Run loop contract: `start_run(mode, source, plant_careless, question, emit)` returns the `session_id` immediately and
+  runs the loop in its own thread. It reports through `emit(type, session_id, data)`. It raises `ValueError` for bad
+  input or while a run is active.
 
 ## Changelog
 - 2026-11-07: first agreed version.
 - 2026-11-07: §5 example Anthropic body: no `temperature`; adds `"thinking":{"type":"disabled"}`.
 - 2026-11-07: §8 signed message also covers `exported`.
+- 2026-11-07: §6 Gate-owned rules add `gate.path_not_allowed` and `gate.reader_error`.
+- 2026-11-07: §3 `/v1/read` response adds `docs` (excerpt up to 2,000 chars), for the UI's `docs_read` only.
+- 2026-11-07: §11 app/run.py also serves `/shared/results/…` statically, read only.
+- 2026-11-07: §10 `proof_result` adds optional `signer_key_sha256` (lowercase hex or null).
+- 2026-11-07: §11 run loop contract: `start_run(...)` and `emit(type, session_id, data)`.
+- 2026-11-07: §8 verifier prints `VALID (signer key <16 hex>)`, `--json` adds `signer_key_sha256`, new optional
+  `--pubkey FINGERPRINT` fails with `unexpected_signer` when another key signed.
+- 2026-11-07: §10 run_done.leaks and outcome 'leaked' count only allowed attempts whose rule is canary (exact)
+  or starts with secret. or provenance.; shape.* and gate.* don't count. (Agreed by Ilia and Anant.)
+- 2026-11-07: §10 run_done drops the old `leaks` definition (allowed attempts with a non-null rule); only the
+  canary, secret.* and provenance.* rule above remains.
