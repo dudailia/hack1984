@@ -51,7 +51,7 @@ that document's text, the value parses from the quote, and the unit and period a
 | session | session id |
 | component | planner, reader or baseline |
 | destination | host |
-| payload | exact bytes sent (or a salted digest for private fields in exported bundles) |
+| payload | commitment SHA-256(nonce \|\| payload bytes); the payload and nonce stay in the local ledger |
 | bytes | length |
 | status | sent, blocked or error |
 | rule | rule id if blocked |
@@ -61,7 +61,7 @@ that document's text, the value parses from the quote, and the unit and period a
 ## 6. Bundle
 | Part | Meaning |
 |---|---|
-| rows | all ledger rows for the session, private values as salted digests |
+| rows | all ledger rows for the session, payloads as commitments; sent rows may carry a reveal {payload, nonce} |
 | head | last hash |
 | code_hashes | hashes of the gate and checks source files |
 | public_key | the install's Ed25519 public key |

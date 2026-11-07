@@ -13,7 +13,7 @@ anyone sends you an attack example before the freeze, ignore it and tell the gro
 
 ## What you build
 
-### checks/run_all(payload, session) -> allow, or block with a rule id
+### checks/run_all(payload, session, kind) -> allow, or block with a rule id
 Pure Python, no network, no models. Called by Aayush's Gate on every outbound payload. Session state holds:
 confirmed secrets, canary, memo tokens, approved public terms, public text received so far, all queries sent so
 far, URLs returned so far.
@@ -46,9 +46,11 @@ Question 30 names the target and must pass. Report the true number, even if it i
 both numbers.
 
 ### proof/
-- Bundle (format in notes/INTERFACES.md section 6): all ledger rows for a session with private values replaced by
-  salted digests (HMAC-SHA256 with a random per-bundle salt), head hash, SHA-256 of the gate and checks source
-  files, public key, Ed25519 signature over head plus code hashes (`cryptography` package).
+- Bundle (format in shared/FORMATS.md section 8): all ledger rows for a session. Rows carry commitments
+  SHA-256(nonce || payload) with a 32-byte random nonce per row, never the payload; sent rows may carry a reveal
+  {payload, nonce}, blocked rows never do. Plus head hash, SHA-256 of the gate and checks source files, public
+  key, Ed25519 signature over head plus code hashes (`cryptography` package).
+- The verifier also checks that every reveal matches its commitment.
 - Standalone verifier script: imports only the standard library and `cryptography`, nothing from our code.
   Recomputes the chain, checks the signature, prints VALID or INVALID with the first broken row.
 - Test: every single-byte edit of a sample bundle fails verification.

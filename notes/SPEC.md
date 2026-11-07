@@ -68,11 +68,13 @@ Blocked attempts are ledgered with the rule that fired.
 - Event code HACK1984 gives 8,000 Tavily credits (valid Nov 6 to 9). Exa code EXA50NORTHEASTERN gives $50.
 
 ## Ledger and proof
-- Append-only SQLite, one row per outbound attempt, written before sending: sequence, time, session, component,
-  destination, exact bytes, status, rule, previous hash, hash.
+- Append-only SQLite with two row types, never updated: an attempt row written before sending (decision allowed
+  or blocked, rule, payload commitment) and a result row written after (status, HTTP status, credits). Each row is
+  hash-chained to the previous one. Exact fields: shared/FORMATS.md section 7.
 - Bundle signed with Ed25519 (via the `cryptography` package: the standard library has no Ed25519, and writing
   our own crypto at a hackathon is a red flag), plus a standalone verifier.
-- Private values stored as salted digests so the bundle can be shared.
+- Private values stored as commitments SHA-256(nonce || payload), with an optional reveal on sent rows, so the
+  bundle can be shared.
 - Stretch: the macOS kernel sandbox on the Planner and Reader processes, so the isolation is enforced by the OS
   and not only by our code.
 

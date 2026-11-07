@@ -20,9 +20,10 @@ If you slip, say so in the group chat immediately. Ilia checks in with you at 12
 - Endpoints (finalize names in shared/FORMATS.md): one for search, one for extract, one for Reader jobs.
 - Exact host allowlist: `api.tavily.com`; `api.anthropic.com` only for Reader jobs. Anything else: refuse and
   ledger it as blocked.
-- Order for every outbound request, never changed: build payload, call `checks.run_all(payload, session)`, write
-  ledger row (status sent or blocked, rule), then send only if allowed, then update the row with the result
-  (or write a result row: agree with Anant which).
+- Order for every outbound request, never changed: build payload, call `checks.run_all(payload, session, kind)`,
+  write the attempt row (decision allowed or blocked, rule), then send only if allowed, then append a result row
+  (status sent or error). Rows are never updated; blocked attempts get no result row. Exact fields:
+  shared/FORMATS.md section 7.
 - Result ids: keep a session map `result_id -> url, title, content` inside the Gate. The Planner gets ids only.
   Extract accepts only ids this session returned.
 - Tavily details (see notes/RESEARCH.md): POST https://api.tavily.com/search with `Authorization: Bearer <key>`.
@@ -33,10 +34,16 @@ If you slip, say so in the group chat immediately. Ilia checks in with you at 12
 - Use the team Tavily key from the event code HACK1984 (8,000 credits, valid Nov 6 to 9) on the demo laptop.
 
 ### 2. Ledger (SQLite, append only)
-Row: seq, time, session, component (planner, reader, baseline), destination host, exact payload bytes, byte
-length, status (sent, blocked, error), rule, prev_hash, hash = SHA-256(prev_hash + canonical JSON of the row).
+Two append-only row types, never updated (exact fields and test vectors in shared/FORMATS.md section 7):
+- attempt row, written before sending: seq, time, session_id, row_type "attempt", component, kind, destination,
+  commitment, bytes, decision (allowed or blocked), rule;
+- result row, written after: seq, time, session_id, row_type "result", attempt_seq, status (sent or error),
+  http_status, credits_used, response_commitment.
+Every row has prev_hash and hash = SHA-256 of the canonical row (sorted-key JSON, UTF-8, no whitespace).
+commitment = SHA-256(nonce || payload bytes) with a fresh 32-byte nonce per row; nonces and payloads stay in the
+local ledger only, so the chain never hashes the payload itself.
 Test: there is no function that sends without first writing a row. Anant builds the bundle and verifier on top
-of your table, so agree the canonical form with him by 12:30.
+of your table; confirm the canonical form with him at 12:30 against the FORMATS test vectors.
 
 ### 3. Audit hook (invariant 1)
 `sys.addaudithook` in every non-Gate process: on `socket.connect`, raise if the address is not 127.0.0.1 or ::1.
@@ -45,7 +52,12 @@ Test: the Planner process cannot open a connection to any outside host.
 ### 4. planner/
 - Ollama on `http://localhost:11434/api/chat`, with `format` set to the JSON schema of a research request so the
   model can only return valid JSON. `stream: false`, temperature low.
-- Model: try `qwen3:8b` first, `llama3.1:8b` as fallback. Pick the one that follows the schema on 10 tries.
+- The request body must include `"think": false`. Putting `/no_think` in the prompt does not work (about 2 minutes
+  per call instead of 3 seconds).
+- The Planner prompt states today's date; otherwise qwen3 assumes it is 2024.
+- Model name comes from `.env` `OLLAMA_MODEL`: `qwen3:4b` for development, `qwen3:8b` on the demo laptop
+  (`llama3.1:8b` as fallback). Pick the one that follows the schema on 10 tries. Red-team and false-block numbers
+  are measured on `qwen3:8b`.
 - Inputs only: memo, question, and typed fields per research need (numbers, units, periods, found or not found).
   Never titles, snippets, URLs or page text. Test: feed a fake web string into the Gate and assert it never
   appears in any Planner input.

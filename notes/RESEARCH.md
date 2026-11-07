@@ -49,6 +49,13 @@ need far more memory. These are blog rankings, not audited numbers: test two mod
 the one that follows the schema. The Planner does not need tool calling if it returns JSON for the gate;
 structured output is enough.
 
+Measured on Nov 7 (team):
+- Ollama /api/chat needs `"think": false` in the request body and the JSON schema in `"format"`. `/no_think` in the
+  prompt does not work: about 2 minutes per call vs 3 seconds.
+- Put today's date in the Planner prompt; qwen3 otherwise assumes it is 2024.
+- Model from `.env` `OLLAMA_MODEL`: `qwen3:4b` for development, `qwen3:8b` on the demo laptop.
+- Red-team and false-block numbers are measured on `qwen3:8b`.
+
 ## Fictional names check
 "Fenwick" is a real law firm (Fenwick & West) active in fintech: do not use. "Brackwater Payments" and "Ossory
 Capital" returned no exact matches on Nov 6.

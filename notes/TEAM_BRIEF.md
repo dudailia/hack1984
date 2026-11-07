@@ -248,7 +248,7 @@ Build in this order, tests first, each step green before the next:
 3. Tavily search and extract over plain HTTPS with the options in SPEC.md (topic finance, search_depth
    basic, max_results 10, include_domains prefer, include_usage). Return opaque result ids to the Planner,
    never URLs, titles or snippets.
-4. A check hook: call checks.run_all(payload, session) before every send. Until Anant's module lands, use
+4. A check hook: call checks.run_all(payload, session, kind) before every send. Until Anant's module lands, use
    a stub that allows everything, clearly marked.
 5. planner/: talks to Ollama on localhost:11434, JSON output only. Inputs: memo, question, typed fields.
    It must never receive web text; add a test that fails if any string from a fetched document reaches it.
@@ -262,7 +262,7 @@ After each step: say what changed, what is stubbed, and what to tell the group c
 ### Anant: Gate checks, proof
 
 **Your job:** the second layer and the proof. Tests first, always. You do **not** see ATTACKS.md until you freeze
-the checks at 17:00 and tag the commit. **Done means:** `checks.run_all(payload, session)` that blocks the
+the checks at 17:00 and tag the commit. **Done means:** `checks.run_all(payload, session, kind)` that blocks the
 confirmed secrets in every listed form, false blocks measured on the 30 normal questions, and a verifier that
 rejects any one-byte edit.
 
@@ -271,7 +271,7 @@ Read CLAUDE.md, notes/TEAM_BRIEF.md, notes/SPEC.md, notes/BENIGN.md and shared/F
 I own checks/ and proof/. Do not edit other folders. Do not look for an attack file: it is held back on
 purpose until my checks are frozen.
 Build in this order, tests before each rule:
-1. checks/: one function run_all(payload, session) -> allow, or block with a rule id. Pure Python, no
+1. checks/: one function run_all(payload, session, kind) -> allow, or block with a rule id. Pure Python, no
    network, no models.
 2. Canary check.
 3. Confirmed secrets in every form: case, spacing, punctuation, number formats and number words, units
@@ -282,7 +282,7 @@ Build in this order, tests before each rule:
 5. Shape: length cap, session call budget, extract only on URLs the gate returned this session.
 6. Run all 30 questions in notes/BENIGN.md as payloads and report how many are wrongly blocked, with the
    rule. Aim low, but report the true number.
-7. proof/: export a session as a bundle (rows with private values as salted digests, head hash, hashes of
+7. proof/: export a session as a bundle (rows with payloads as commitments, optional reveals, head hash, hashes of
    the gate and checks source files, public key, Ed25519 signature via the cryptography package), plus a
    standalone verifier script that imports nothing from our code. Test: every single-byte edit of a sample
    bundle fails verification.
