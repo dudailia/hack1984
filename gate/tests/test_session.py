@@ -26,7 +26,7 @@ class TestSession(unittest.TestCase):
         self.dir = tempfile.TemporaryDirectory()
         self.led = Ledger(os.path.join(self.dir.name, "t.db"))
         self.seen_memo = []
-        self.store = SessionStore(self.led, memo_tokens_fn=lambda m: (self.seen_memo.append(m), ["ossory"])[1])
+        self.store = SessionStore(self.led, memo_tokens_fn=lambda m, t: (self.seen_memo.append((m, t)), ["ossory"])[1])
 
     def tearDown(self):
         self.led.close()
@@ -60,9 +60,17 @@ class TestSession(unittest.TestCase):
 
     def test_memo_not_kept(self):
         s = self.store.create(body())
-        self.assertEqual(self.seen_memo, [MEMO])
+        self.assertEqual(self.seen_memo, [(MEMO, ["Brackwater Payments", "payments"])], "called once, memo + terms")
         self.assertNotIn(MEMO, repr(s))
         self.assertNotIn("preparing an offer", repr(vars(self.store)))
+
+    def test_memo_tokens_gets_a_copy_of_terms(self):
+        def mutating(m, terms):
+            terms.append("injected")
+            return ["x"]
+        store = SessionStore(self.led, memo_tokens_fn=mutating)
+        s = store.create(body(session_id="s_copyterms1"))
+        self.assertEqual(s["approved_public_terms"], ["Brackwater Payments", "payments"])
 
     def test_inputs_copied(self):
         b = body()

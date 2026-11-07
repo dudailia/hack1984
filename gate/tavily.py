@@ -81,8 +81,9 @@ def search(pipeline, session_id, component, need, query, preset, api_key):
             resp["detail"] = out["detail"]
             return resp
 
+        # Counters are updated only here, after the send, so at run_all time they mean "used before this call".
+        # call_count counts every attempt that reached the network (sent or error); blocked attempts never do.
         session["call_count"] += 1
-        session["queries_sent"].append(query)
         # ledger row: credits from Tavily, null for the fake; response: always an int (0 when unknown)
         credits = out["rows"][-1].get("credits_used") if real else None
         resp["credits_used"] = credits or 0
@@ -90,11 +91,18 @@ def search(pipeline, session_id, component, need, query, preset, api_key):
             session["credits_used"] += credits
         if out["status"] != "sent":
             return resp
+        session["queries_sent"].append(query)  # only queries actually sent (2xx)
 
         try:
             results, _ = parse_search(out["response"])
         except (ValueError, AttributeError):
             results = []
+        # Public text is recorded as soon as the response arrives, before any Reader request is built,
+        # for every parsed result (including any past the r_99 id cap).
+        for r in results:
+            for text in (r["title"], r["content"]):
+                if text:
+                    session["public_text_received"].append(text)
         issued = []
         for r in results:
             if state.next_result_n > MAX_RESULT_ID:
@@ -104,9 +112,6 @@ def search(pipeline, session_id, component, need, query, preset, api_key):
             state.docs[rid] = r
             session["result_ids"][rid] = r["url"]
             session["urls_returned"].append(r["url"])
-            for text in (r["title"], r["content"]):
-                if text:
-                    session["public_text_received"].append(text)
             issued.append(rid)
         resp["result_ids"] = issued
         if component == "baseline":

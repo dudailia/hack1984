@@ -20,7 +20,7 @@ class TestStub(unittest.TestCase):
 
     def test_memo_tokens_stub(self):
         with contextlib.redirect_stderr(io.StringIO()):
-            self.assertEqual(checks_stub.memo_tokens("anything"), [])
+            self.assertEqual(checks_stub.memo_tokens("anything", ["payments"]), [])
 
 
 class TestBridge(unittest.TestCase):
@@ -35,7 +35,7 @@ class TestBridge(unittest.TestCase):
     def test_real_checks_used(self):
         fake = types.ModuleType("checks")
         fake.run_all = lambda p, s, k: {"decision": "block", "rule": "x", "detail": None}
-        fake.memo_tokens = lambda m: ["t"]
+        fake.memo_tokens = lambda m, t: ["t"]
         with mock.patch("importlib.util.find_spec", return_value=object()), \
                 mock.patch.dict(sys.modules, {"checks": fake}):
             run_all, memo_tokens, name = checks_bridge.load()

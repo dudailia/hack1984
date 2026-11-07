@@ -54,7 +54,7 @@ class Base(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.led = Ledger(os.path.join(self.dir.name, "t.db"))
-        self.store = SessionStore(self.led, memo_tokens_fn=lambda m: [])
+        self.store = SessionStore(self.led, memo_tokens_fn=lambda m, t: [])
         self.store.create(session_body(self.sid, self.mode, self.source))
         self.check_calls = []
         self.tr = RecordingTransport(self, self.led, self.sid)

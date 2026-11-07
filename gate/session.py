@@ -71,7 +71,8 @@ class SessionStore:
     def create(self, body):
         _validate(body)
         sid = body["session_id"]
-        tokens = self._memo_tokens_fn(body["memo"])
+        # Anant's interface: memo_tokens(memo, approved_public_terms) -> [str], called once per session
+        tokens = self._memo_tokens_fn(body["memo"], list(body["approved_public_terms"]))
         if not _str_list(tokens):
             raise SessionError("memo_tokens_error", "memo_tokens function returned a bad value", http=500)
         session = {

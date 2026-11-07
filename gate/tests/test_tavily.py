@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import tempfile
@@ -76,7 +77,7 @@ class TestSearch(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.led = Ledger(os.path.join(self.dir.name, "t.db"))
-        self.store = SessionStore(self.led, memo_tokens_fn=lambda m: [])
+        self.store = SessionStore(self.led, memo_tokens_fn=lambda m, t: [])
         self.calls = []
         self.replies = []
 
@@ -178,6 +179,92 @@ class TestSearch(unittest.TestCase):
         self.replies = [tavily_reply(2)]
         r = tavily.search(pipe, "s_tav000008", "planner", "n", "q", "general", api_key="tvly-K")
         self.assertEqual(r["result_ids"], ["r_99"])
+        # text was received even for the result that got no id: provenance must see it
+        self.assertIn("Content 1", self.store.get("s_tav000008")["public_text_received"])
+
+
+class TestSessionCounters(unittest.TestCase):
+    """Per Anant: at run_all time call_count and credits_used mean 'already used before this call';
+    queries_sent holds only queries that were actually sent (not blocked, not errored)."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.led = Ledger(os.path.join(self.dir.name, "t.db"))
+        self.store = SessionStore(self.led, memo_tokens_fn=lambda m, t: [])
+        self.store.create({"session_id": "s_count0001", "mode": "doublethink", "source": "real", "memo": "m",
+                           "canary": "c", "confirmed_secrets": [], "approved_public_terms": []})
+        self.seen = []        # snapshot of the session as run_all saw it
+        self.block_next = False
+        self.replies = []
+        self.pipe = Pipeline(self.led, self.store, self.transport, self.run_all, 8702)
+
+    def tearDown(self):
+        self.led.close()
+        self.dir.cleanup()
+
+    def run_all(self, payload, session, kind):
+        self.seen.append({k: copy.deepcopy(session[k]) for k in
+                          ("call_count", "credits_used", "queries_sent", "public_text_received")})
+        if self.block_next:
+            return {"decision": "block", "rule": "secret.buyer", "detail": None}
+        return ALLOW
+
+    def transport(self, dest, path, payload, headers):
+        return self.replies.pop(0)
+
+    def search(self, q, block=False):
+        self.block_next = block
+        return tavily.search(self.pipe, "s_count0001", "planner", "n", q, "general", api_key="tvly-K")
+
+    def test_sequence_sent_blocked_error_sent(self):
+        self.replies = [tavily_reply(2, credits=1)]
+        self.assertEqual(self.search("q1")["status"], "sent")
+        self.assertEqual(self.search("q2 blocked", block=True)["status"], "blocked")
+        self.replies = [(500, b'{"detail":"boom"}')]
+        self.assertEqual(self.search("q3 errored")["status"], "error")
+        self.replies = [tavily_reply(1, start=2, credits=1)]
+        self.assertEqual(self.search("q4")["status"], "sent")
+
+        counts = [(s["call_count"], s["credits_used"], s["queries_sent"]) for s in self.seen]
+        self.assertEqual(counts, [
+            (0, 0, []),              # q1: nothing used yet
+            (1, 1, ["q1"]),          # q2: q1 counted
+            (1, 1, ["q1"]),          # q3: blocked q2 not counted, not in queries_sent
+            (2, 1, ["q1"]),          # q4: errored q3 used a call (it hit the network) but was not "sent"
+        ])
+        s = self.store.get("s_count0001")
+        self.assertEqual((s["call_count"], s["credits_used"], s["queries_sent"]), (3, 2, ["q1", "q4"]))
+
+    def test_blocked_query_not_recorded(self):
+        r = self.search("Ossory offer", block=True)
+        s = self.store.get("s_count0001")
+        self.assertEqual(r["status"], "blocked")
+        self.assertEqual((s["call_count"], s["credits_used"], s["queries_sent"]), (0, 0, []))
+
+    def test_errored_query_not_in_queries_sent(self):
+        for reply in [(401, b'{"detail":"no"}'), (500, b"")]:
+            self.replies = [reply]
+            self.assertEqual(self.search("q err")["status"], "error")
+        s = self.store.get("s_count0001")
+        self.assertEqual(s["queries_sent"], [])
+        self.assertEqual((s["call_count"], s["credits_used"]), (2, 0))
+
+    def test_transport_exception_not_in_queries_sent(self):
+        def boom(*a):
+            raise OSError("down")
+        self.pipe.transport = boom
+        r = self.search("q down")
+        self.assertEqual(r["status"], "error")
+        self.assertEqual(self.store.get("s_count0001")["queries_sent"], [])
+
+    def test_public_text_added_on_arrival(self):
+        self.replies = [tavily_reply(3)]
+        self.search("q1")
+        # visible to the very next run_all, before any reader job exists
+        self.replies = [tavily_reply(1, start=3)]
+        self.search("q2")
+        texts = self.seen[1]["public_text_received"]
+        self.assertEqual(texts, ["Title 0", "Content 0", "Title 1", "Content 1", "Title 2", "Content 2"])
 
 
 if __name__ == "__main__":

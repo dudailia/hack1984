@@ -31,7 +31,7 @@ class Base(unittest.TestCase):
 
 class TestIdTrailingNewline(Base):
     def test_session_id_newline_refused(self):
-        store = SessionStore(self.led, lambda m: [])
+        store = SessionStore(self.led, lambda m, t: [])
         with self.assertRaises(SessionError):
             store.create(sbody("s_abcdefgh\n"))
 
@@ -58,7 +58,7 @@ class TestInsertTriggers(Base):
 
 class TestCheckSystemExit(Base):
     def test_system_exit_in_checks_is_check_error_with_row(self):
-        store = SessionStore(self.led, lambda m: [])
+        store = SessionStore(self.led, lambda m, t: [])
         store.create(sbody("s_hard00003"))
 
         def exits(p, s, k):
@@ -115,7 +115,7 @@ class TestNegativeContentLength(Base):
     def test_negative_content_length_400(self):
         import http.client
         import threading
-        srv = server.make_server(self.led, lambda *a: (200, b"{}"), lambda p, s, k: None, lambda m: [], 8702, None,
+        srv = server.make_server(self.led, lambda *a: (200, b"{}"), lambda p, s, k: None, lambda m, t: [], 8702, None,
                                  port=0)
         t = threading.Thread(target=srv.serve_forever, daemon=True)
         t.start()

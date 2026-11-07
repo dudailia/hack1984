@@ -25,7 +25,7 @@ class TestServer(unittest.TestCase):
         self.led = Ledger(os.path.join(self.dir.name, "t.db"))
         self.check = ALLOW
         self.calls = []
-        self.srv = server.make_server(self.led, self.transport, lambda p, s, k: self.check, lambda m: [],
+        self.srv = server.make_server(self.led, self.transport, lambda p, s, k: self.check, lambda m, t: [],
                                       fake_port=8702, tavily_key="tvly-K", port=0)
         self.port = self.srv.server_address[1]
         self.t = threading.Thread(target=self.srv.serve_forever, daemon=True)
@@ -138,8 +138,19 @@ class TestServer(unittest.TestCase):
         self.assertEqual(self.req("POST", "/v1/session", session("s_srv000010"), ctype="text/plain")[0], 415)
 
     def test_body_too_large(self):
-        st, b = self.req("POST", "/v1/session", raw=b"{" + b" " * (server.MAX_BODY + 1) + b"}")
+        # Declare a length over the cap but send a tiny body: the server rejects on the header alone, so the
+        # client never races a closed socket (the old 1 MB send hit BrokenPipeError about 1 run in 6).
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.putrequest("POST", "/v1/session")
+        conn.putheader("Content-Type", "application/json")
+        conn.putheader("Content-Length", str(server.MAX_BODY + 1))
+        conn.endheaders(b"{}")
+        r = conn.getresponse()
+        st, b = r.status, json.loads(r.read())
+        conn.close()
         self.assertEqual(st, 413)
+        self.assertEqual(b, {"status": "error", "error": "too_large", "detail": "body too large"})
+        self.assertEqual(self.led.rows("s_srv000001"), [])
 
     def test_log_has_no_bodies(self):
         err = io.StringIO()
