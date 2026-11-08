@@ -515,15 +515,31 @@ All motion uses `--ease`. Durations at or under 250ms, except the sequences abov
 
 ## 7. Results screen (`beat.data.screen = "results"`, or key S)
 
-- It replaces the whole main area.
-- All numbers come from `/shared/results/results.json`. Until that file exists, they come from
-  `/shared/fixtures/results_example.json`, with its banner. **No number is typed into the code.**
+- It replaces the whole main area, including the Outbound strip and the footer.
+- **Measured numbers come only from `/shared/results/results.json`. No number is typed into the code.**
   - app/run.py serves `/shared/results/` (FORMATS §11, confirmed by Ilia), and so does `ui/preview.py`.
+- **No silent example data (Ilia's must-fix).** The page never falls back to `results_example.json` on its own.
+
+  | Situation | What the screen shows |
+  |---|---|
+  | `results.json` missing (404) | **"No measured results yet"**: the path that is missing, that numbers appear once the red-team run writes it, and how to preview with `?example=1`. No numbers, no bars, and the example file is not even fetched. |
+  | `results.json` unreadable (HTTP error, bad JSON, no runs) | The same "No measured results yet" state, with the error. |
+  | `results.json` marked `"example": true` | The same state ("marked as example data, so it is not shown as a measurement"). Example data cannot enter through the real path either. |
+  | `results.json` present and not marked as example | The measured screen below. |
+  | URL has **`?example=1`** | Only the example file is loaded (the real one is not used). A large **"EXAMPLE DATA, not measured"** banner sits at the top (--fs-3, dashed outline), naming the file and the parameter. **Every number** carries the same label right next to it (18px bold, dashed outline): the attack total, each bar value, false blocks, answered-with-a-cited-number and both cost figures. |
+
+  The label uses neutral ink (`--text`) with a dashed border, never red, green or amber, which keep their meanings.
+  Both themes follow these rules.
+- Tests (`ui/tests/ui.test.html`, run by `test_ui_browser`), in both themes:
+  - with `results.json` missing, the screen says "No measured results yet", shows no numbers or bars, shows no example
+    label, and the page makes no request for `results_example.json`;
+  - with `?example=1`, the banner is at least 24px, every `[data-num]` value carries the label at 18px or more, and
+    exactly one example fetch is made.
+  - If a checkout already has `results.json`, the missing-file case reports SKIP, and the test instead checks that the
+    example file is not fetched without `?example=1`.
 - FORMATS §9 still has one judgement per run (`leak_judge`, a single description). If it ever stores several
   (for example the frozen detector plus a fallback), the screen shows the frozen-detector judgement and labels any
   fallback clearly.
-- When `example` is true, a full-width banner shows the `banner` text in off-white on black with a 4px off-white
-  border. It is not red.
 - Title: `{attacks_total} attacks, written and hashed before the code.` `attack_file_sha256` is shown short below
   the title.
 - There are four horizontal bars from `runs[i].modes`, one row each, with the label at --fs-4, the bar, and the value
@@ -633,6 +649,7 @@ All motion uses `--ease`. Durations at or under 250ms, except the sequences abov
   | `?play=1` | starts playing |
   | `?title=0` | skips the title screen |
   | `?open=answer` | opens the answer sheet |
+  | `?example=1` | the results screen shows `shared/fixtures/results_example.json`, with "EXAMPLE DATA, not measured" on every number. Without it, example data never appears. |
   | `?freeze=<ms>` | with `?at=`, plays the next 100ms of events with animation, then pauses every animation at `<ms>`, so a frame of a moment can be screenshotted (for example `?at=86500&freeze=450` for the block, `?at=20990&freeze=900` for the leak) |
 
 ## 10. Items not in shared/FORMATS.md
@@ -643,7 +660,7 @@ None.
 ### Resolved
 | # | Item | Resolution | Source |
 |---|---|---|---|
-| 2 | How the page reads `shared/results/results.json` | app/run.py serves `/shared/results/…` statically (FORMATS §11). The page reads `/shared/results/results.json` and falls back to the example file. | Ilia confirmed |
+| 2 | How the page reads `shared/results/results.json` | app/run.py serves `/shared/results/…` statically (FORMATS §11). The page reads `/shared/results/results.json` only. If it is missing it shows "No measured results yet" (section 7). The example file loads only with `?example=1`, and then every number is labelled. | Ilia confirmed; no-fallback rule is Ilia's must-fix |
 | 1 | The token in the UI URL | `?token=` in the page URL. The page sends it as `?token=` on `/events` and `/api/bundle`, and as the `X-DT-Token` header on `/api/*` POSTs. | Aayush confirmed |
 | 3 | The mode for the Single agent toggle | `compromised` (with `source: "fake"`) | notes/DEMO.md |
 | 4 | The body Run sends | `POST /api/run {"mode", "source": "real"\|"fake", "plant_careless": true\|false}`. The source selector next to Run sets `source`, and a "careless query" switch sets `plant_careless`. Single agent forces `fake`. | Aayush |

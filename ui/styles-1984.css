@@ -621,6 +621,16 @@ mark.planted {
 .results-title { font-size: var(--fs-3); line-height: 1.2; font-weight: 400; }
 .results-title .big { font-size: var(--fs-6); font-weight: 700; margin-right: 0.2em; }
 .results .sha { color: var(--text-muted); margin: var(--sp-2) 0 var(--sp-5); }
+/* No silent example data (same rules as the console theme): empty state, and labelled numbers in ?example=1. */
+.no-results { max-width: 60ch; margin-top: var(--sp-6); padding: var(--sp-5); border: 4px solid var(--text); }
+.no-results-why { margin: var(--sp-3) 0; font-size: var(--fs-2); }
+.example-banner { display: block; margin-bottom: var(--sp-5); padding: var(--sp-2) var(--sp-4); font-size: var(--fs-3); font-weight: 700; border: 4px dashed var(--text); }
+.example-banner-sub { display: block; font-size: var(--fs-0); font-weight: 400; color: var(--text-muted); }
+.num-val { display: inline-flex; flex-direction: column; align-items: flex-start; vertical-align: top; }
+.bars .bv .num-val { align-items: flex-end; }
+.example-tag { display: block; font-size: var(--fs-1); font-weight: 700; line-height: 1.2; color: var(--text); border: 2px dashed var(--text); padding: 0 6px; white-space: nowrap; }
+.num-val.big { flex-direction: row; align-items: center; gap: var(--sp-3); }
+.results-title .big .example-tag { font-size: var(--fs-1); }
 .bars { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: var(--sp-3) var(--sp-5); align-items: center; }
 .bars .bl { font-size: var(--fs-4); line-height: 1.2; }
 .bars .bv { font-size: var(--fs-4); line-height: 1.2; text-align: right; }

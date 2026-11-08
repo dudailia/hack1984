@@ -151,6 +151,40 @@
       const doc = await load('at=106500&theme=console');
       ok('panel: follows the verified run in the proof beat', doc.getElementById('ob-summary').textContent === O.summaryText(O.summarize(sessions.s_dtreal1)), doc.getElementById('ob-summary').textContent);
     }
+    // ---------- results screen: never example data unless ?example=1 (Ilia's must-fix) ----------
+    {
+      const head = await fetch('/shared/results/results.json', { cache: 'no-store' });
+      const exampleLoads = (doc) => doc.defaultView.performance.getEntriesByType('resource')
+        .filter((e) => e.name.includes('results_example.json')).length;
+      if (head.status === 404) {
+        for (const th of ['console', '1984']) {
+          const doc = await load(`at=125000&theme=${th}`);
+          const box = doc.getElementById('results');
+          const text = box.textContent;
+          ok(`missing results.json: "No measured results yet" (${th})`, box.classList.contains('open') && has(text, 'No measured results yet'), text.slice(0, 200));
+          ok(`missing results.json: no numbers, no bars (${th})`, !box.querySelector('.bars, .track, .bv, .big') && !/\d+\s*\/\s*\d+/.test(text) && !has(text, 'attacks'), text.slice(0, 200));
+          // Neither the old banner text nor the new label may appear; the hint "with example data" may.
+          ok(`missing results.json: example never shown or fetched (${th})`, !has(text, 'EXAMPLE DATA') && !box.querySelector('.example-banner, .example-tag') && exampleLoads(doc) === 0, `${exampleLoads(doc)} example fetches; text: ${text.slice(0, 120)}`);
+          ok(`missing results.json: says how to preview (${th})`, has(text, '?example=1'), text.slice(0, 300));
+        }
+      } else {
+        out.push('SKIP missing-file case: /shared/results/results.json exists on this checkout');
+        const doc = await load('at=125000&theme=console');
+        ok('results.json present: example file not fetched without ?example=1', exampleLoads(doc) === 0, `${exampleLoads(doc)} example fetches`);
+      }
+      // Explicit ?example=1: the example file, a large label at the top and on every number.
+      const doc = await load('at=125000&theme=console&example=1');
+      const box = doc.getElementById('results');
+      const label = 'EXAMPLE DATA, not measured';
+      const banner = box.querySelector('.example-banner');
+      ok('?example=1: large banner', !!banner && has(banner.textContent, label) && parseFloat(doc.defaultView.getComputedStyle(banner).fontSize) >= 24, banner ? doc.defaultView.getComputedStyle(banner).fontSize : 'no banner');
+      const numbers = [...box.querySelectorAll('[data-num]')];
+      const unlabelled = numbers.filter((n) => !n.querySelector('.example-tag') || !has(n.querySelector('.example-tag').textContent, label));
+      ok('?example=1: every number carries the label', numbers.length >= 7 && unlabelled.length === 0, `${numbers.length} numbers, ${unlabelled.length} unlabelled`);
+      const tagSize = numbers.length ? parseFloat(doc.defaultView.getComputedStyle(numbers[0].querySelector('.example-tag')).fontSize) : 0;
+      ok('?example=1: the label is large (>= 18px)', tagSize >= 18, `${tagSize}px`);
+      ok('?example=1: only the example file was fetched', exampleLoads(doc) === 1, `${exampleLoads(doc)}`);
+    }
     {
       // The results screen still covers the Outbound strip and the footer (grid rows 2 to 4).
       const doc = await load('at=125000&theme=console');

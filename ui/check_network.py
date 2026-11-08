@@ -165,6 +165,8 @@ def main(out=EVIDENCE):
             problems.append(f"{r['theme']}: the page loaded resources from: {', '.join(ext_resources)}")
         if ext_connects:
             problems.append(f"{r['theme']}: a socket connected to a non-loopback address: {', '.join(ext_connects)}")
+        if any("results_example.json" in u for u in page.get("urls", [])):
+            problems.append(f"{r['theme']}: the example results file was loaded without ?example=1")
         lines.append((r, page, ext_page_req, ext_resources, ext_connects))
 
     verdict = "PASS: the page requested only 127.0.0.1 and nothing connected anywhere else" if not problems else "FAIL"
@@ -194,7 +196,9 @@ def main(out=EVIDENCE):
         " connect to an address other than 127.0.0.1.",
         "- The replay plays with `?play=1` under headless virtual time. Every fixture event is dispatched; animation"
         " frames are coarser than in a real browser, so a screen that is open only between two polls (the results"
-        " screen) may not be sampled. The results file itself is in the resource list.",
+        " screen) may not be sampled.",
+        "- The replay runs without `?example=1`, so `results_example.json` must not be loaded; the check fails if it"
+        " appears in the page's resource list.",
         "",
     ]
     for r, page, ext_page_req, ext_resources, ext_connects in lines:

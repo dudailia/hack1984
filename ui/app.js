@@ -829,26 +829,69 @@
     return r.json();
   }
 
+  // Results (FORMATS §9). Measured numbers come only from /shared/results/results.json. There is no silent fallback:
+  // example data is loaded only when the URL says ?example=1, and then every number is labelled as example data.
+  const EXAMPLE_MODE = params.get('example') === '1';
+  const EXAMPLE_LABEL = 'EXAMPLE DATA, not measured';
+  let resultsState = 'loading';   // 'measured' | 'example' | 'missing' | 'not-measured' | 'error'
+  let resultsError = '';
+
   async function loadResults() {
-    try {
-      results = await fetchJSON(RESULTS_REAL);
-      resultsSource = RESULTS_REAL;
-    } catch (_) {
+    results = null;
+    resultsError = '';
+    if (EXAMPLE_MODE) {
       try {
         results = await fetchJSON(RESULTS_EXAMPLE);
         resultsSource = RESULTS_EXAMPLE;
+        resultsState = 'example';
       } catch (e) {
-        results = null;
-        resultsSource = String(e.message || e);
+        resultsState = 'error';
+        resultsError = String(e.message || e);
       }
+      return;
     }
+    try {
+      const r = await fetch(RESULTS_REAL, { cache: 'no-store' });
+      if (r.status === 404) { resultsState = 'missing'; return; }
+      if (!r.ok) throw new Error(`${RESULTS_REAL}: HTTP ${r.status}`);
+      const data = await r.json();
+      resultsSource = RESULTS_REAL;
+      // A results.json that is itself marked as example data is not a measurement either.
+      if (data && data.example) { resultsState = 'not-measured'; return; }
+      results = data;
+      resultsState = 'measured';
+    } catch (e) {
+      resultsState = 'error';
+      resultsError = String(e.message || e);
+    }
+  }
+
+  // A number on the results screen. In example mode it always carries the large example label.
+  function num(text, cls) {
+    return el('span', { class: `num-val${cls ? ` ${cls}` : ''}`, 'data-num': '' }, text,
+      resultsState === 'example' ? el('span', { class: 'example-tag' }, EXAMPLE_LABEL) : null);
+  }
+
+  function renderNoResults(box) {
+    const why = {
+      loading: 'The results file is still loading.',
+      missing: `${RESULTS_REAL} does not exist yet. Measured numbers appear here once the red-team run writes it.`,
+      'not-measured': `${RESULTS_REAL} is marked as example data, so it is not shown as a measurement.`,
+      error: `The results file could not be read: ${resultsError}.`,
+    }[resultsState] || 'No results file.';
+    fill(box, [
+      el('div', { class: 'no-results' },
+        el('h2', { id: 'results-title', class: 'results-title' }, 'No measured results yet'),
+        el('p', { class: 'no-results-why' }, why),
+        el('p', { class: 'smallprint' }, 'To preview the layout with example data, open the page with ',
+          el('code', null, '?example=1'), '. Every number is then labelled as example data.'))]);
   }
 
   function renderResults() {
     const box = $('#results');
-    if (!results || !Array.isArray(results.runs) || results.runs.length === 0) {
-      fill(box, [el('h2', { id: 'results-title', class: 'results-title' }, 'Results file not found.'),
-        el('p', { class: 'smallprint' }, `Tried ${RESULTS_REAL} and ${RESULTS_EXAMPLE}.`)]);
+    const usable = results && Array.isArray(results.runs) && results.runs.length > 0;
+    if (!usable || (resultsState !== 'measured' && resultsState !== 'example')) {
+      renderNoResults(box);
       return;
     }
     const runs = results.runs;
@@ -876,27 +919,31 @@
         }
       }
       grid.append(el('div', { class: 'bl' }, label), track,
-        el('div', { class: 'bv' }, m ? `${m.leaked} / ${m.runs}` : 'not run'));
+        el('div', { class: 'bv' }, m ? num(`${m.leaked} / ${m.runs}`) : 'not run'));
     }
     const fb = run.false_blocks;
     const byRule = fb && fb.by_rule ? Object.entries(fb.by_rule).map(([k, v]) => `${k} ${v}`).join(', ') : '';
     const u = run.usefulness;
     const c = run.cost || {};
     const nm = (v) => (v == null ? 'not measured' : String(v));
+    const isExample = resultsState === 'example';
+    box.classList.toggle('is-example', isExample);
     fill(box, [
-      results.example ? el('div', { class: 'banner', role: 'note' }, results.banner || 'EXAMPLE DATA') : null,
+      isExample ? el('div', { class: 'example-banner', role: 'note' }, EXAMPLE_LABEL,
+        el('span', { class: 'example-banner-sub' }, `Loaded because the URL has ?example=1, from ${resultsSource}.`)) : null,
       el('h2', { id: 'results-title', class: 'results-title' },
-        el('span', { class: 'big' }, String(results.attacks_total)), 'attacks, written and hashed before the code.'),
+        num(String(results.attacks_total), 'big'), ' attacks, written and hashed before the code.'),
       el('p', { class: 'sha' }, `attack file sha256 ${shortHash(results.attack_file_sha256)}`),
       el('p', { class: 'smallprint', style: 'margin:0 0 0.75rem' }, 'Leaks per setup'),
       grid,
       frozen ? el('p', { class: 'smallprint' }, `| = ${frozen.label} run`) : null,
       fb ? el('p', { class: 'fb' }, 'False blocks on normal questions: ',
-        el('span', { class: fb.blocked > 0 ? 'bad' : '' }, `${fb.blocked} / ${fb.total}`),
+        num(`${fb.blocked} / ${fb.total}`, fb.blocked > 0 ? 'bad' : ''),
         byRule ? el('span', { class: 'smallprint' }, `  ${byRule}`) : null) : null,
       el('p', { class: 'smallprint' }, `run ${run.label} · commit ${run.commit} · planner ${run.planner_model} · source ${run.source}`),
-      u ? el('p', { class: 'smallprint' }, `answered with a cited number ${u.answered_with_cited_number} / ${u.total}`) : null,
-      el('p', { class: 'smallprint' }, `Tavily credits per question ${nm(c.tavily_credits_per_question)} · seconds per question ${nm(c.seconds_per_question)}`),
+      u ? el('p', { class: 'smallprint' }, 'answered with a cited number ', num(`${u.answered_with_cited_number} / ${u.total}`)) : null,
+      el('p', { class: 'smallprint' }, 'Tavily credits per question ', num(nm(c.tavily_credits_per_question)),
+        ' · seconds per question ', num(nm(c.seconds_per_question))),
       el('p', { class: 'smallprint' }, `from ${resultsSource}`)]);
   }
 
