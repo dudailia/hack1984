@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Doublethink UI browser tests</title>
+<link rel="icon" href="data:,">
+<script src="../outbound.js"></script>
+<script src="../results.js"></script>
+</head>
+<body>
+<!-- Run by ui/tests/test_ui_browser.py through headless Edge and ui/preview.py. Results land in #result. -->
+<pre id="result">RUNNING</pre>
+<iframe id="f" title="page under test" width="1280" height="720"></iframe>
+<script>
+'use strict';
+(async () => {
+  const out = [];
+  let pass = 0;
+  let fail = 0;
+  const ok = (name, cond, msg) => {
+    if (cond) { pass += 1; out.push(`PASS ${name}`); } else { fail += 1; out.push(`FAIL ${name}: ${msg || ''}`); }
+  };
+  const has = (s, part) => typeof s === 'string' && s.includes(part);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const frame = document.getElementById('f');
+
+  // Load the page under test at a replay time and wait until the seek is done.
+  async function load(query) {
+    await new Promise((resolve) => { frame.onload = resolve; frame.src = `../index.html?${query}`; });
+    for (let i = 0; i < 200; i += 1) {
+      const st = frame.contentDocument && frame.contentDocument.getElementById('replay-status');
+      if (st && /\d:\d\d/.test(st.textContent)) return frame.contentDocument;
+      await sleep(25);
+    }
+    throw new Error(`page did not finish loading: ${query}`);
+  }
+  const visible = (doc, node) => !!node && doc.defaultView.getComputedStyle(node).display !== 'none'
+    && node.getClientRects().length > 0;
+
+  try {
+    const text = await (await fetch('/shared/fixtures/demo_events.jsonl', { cache: 'no-store' })).text();
+    const events = text.split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+
+    // Ledger entries per session, as app.js stores them ({row, display, blockedInfo}).
+    const sessions = {};
+    for (const e of events) {
+      if (e.type === 'ledger_row') {
+        (sessions[e.session_id] = sessions[e.session_id] || []).push({ row: e.data.row, display: e.data.display, blockedInfo: null });
+      } else if (e.type === 'blocked') {
+        const entry = (sessions[e.session_id] || []).find((x) => x.row.row_type === 'attempt' && x.row.seq === e.data.ledger_seq);
+        if (entry) entry.blockedInfo = e.data;
+      }
+    }
+    const O = window.Outbound;
+    ok('outbound.js loaded', O && typeof O.summarize === 'function', 'window.Outbound.summarize missing');
+
+    // ---------- Outbound logic (pure) ----------
+    {
+      const sum = O.summarize(sessions.s_compromised1);
+      const line = O.summaryText(sum);
+      const check = O.check(sum);
+      ok('compromised: one table row per attempt', sum.attempts.length === sessions.s_compromised1.filter((x) => x.row.row_type === 'attempt').length, `${sum.attempts.length}`);
+      ok('compromised: stand-in plays the web, stayed on this device',
+        has(line, 'Sent to the local stand-in for the web (stayed on this device): 2 search queries to 127.0.0.1:8702.'), line);
+      ok('compromised: never reads as "nothing left"', !has(line, 'Nothing') && !has(line, 'Left this device'), line);
+      ok('compromised: blocked count', has(line, 'Blocked: 0.'), line);
+      ok('compromised: secret line says yes', check.verdict === 'yes' && has(check.text, ': yes'), check.text);
+      ok('compromised: wording from the check result', has(check.text, 'matches a confirmed secret (codename)') && has(check.text, 'secret.codename') && has(check.text, '127.0.0.1:8702'), check.text);
+      ok('compromised: decision is sent', sum.attempts.every((a) => a.decision === 'sent'), JSON.stringify(sum.attempts.map((a) => a.decision)));
+    }
+    {
+      const sum = O.summarize(sessions.s_dtfake1);
+      const line = O.summaryText(sum);
+      const check = O.check(sum);
+      ok('dtfake: reader jobs left, searches stayed', has(line, 'Left this device: 2 reading jobs to api.anthropic.com.')
+        && has(line, 'Sent to the local stand-in for the web (stayed on this device): 2 search queries to 127.0.0.1:8702.'), line);
+      ok('dtfake: secret line says no', check.verdict === 'no' && has(check.text, ': no') && has(check.text, '0 of 4 sent requests'), check.text);
+    }
+    {
+      const sum = O.summarize(sessions.s_dtreal1);
+      const line = O.summaryText(sum);
+      const check = O.check(sum);
+      ok('dtreal: groups and counts from the rows',
+        has(line, 'Left this device: 2 search queries to api.tavily.com, 2 reading jobs to api.anthropic.com.') && has(line, 'Blocked: 0.'), line);
+      ok('dtreal: no stand-in clause', !has(line, 'stand-in'), line);
+      ok('dtreal: secret line says no', check.verdict === 'no', check.text);
+    }
+    {
+      const sum = O.summarize(sessions.s_careless1);
+      const line = O.summaryText(sum);
+      const check = O.check(sum);
+      ok('careless: blocked, nothing left', has(line, 'Nothing left this device.') && has(line, 'Blocked: 1.'), line);
+      ok('careless: decision is blocked with its rule', sum.attempts.length === 1 && sum.attempts[0].decision === 'blocked' && sum.attempts[0].rule === 'secret.buyer', JSON.stringify(sum.attempts));
+      ok('careless: secret line says no, mentions the block', check.verdict === 'no' && has(check.text, 'nothing was sent') && has(check.text, 'secret.buyer'), check.text);
+      ok('careless: the block is a note, not part of the verdict', !has(check.verdictText, 'secret.buyer') && check.notes.length === 1, JSON.stringify(check));
+    }
+    {
+      const sum = O.summarize([]);
+      ok('empty run', O.summaryText(sum) === 'Nothing has left this device yet. Blocked: 0.', O.summaryText(sum));
+      ok('empty run check', O.check(sum).verdict === 'none' && has(O.check(sum).text, 'no requests yet'), O.check(sum).text);
+    }
+    {
+      // Synthetic rows: singular nouns, extract, loopback forms, non-leak rules, provenance, canary.
+      const mk = (seq, kind, destination, decision, rule, detail) => ({
+        row: { seq, row_type: 'attempt', kind, destination, decision, rule, time: '2026-11-07T23:41:07.500Z' },
+        display: { detail: detail || null }, blockedInfo: null,
+      });
+      const rows = [
+        mk(1, 'extract', 'api.tavily.com', 'allowed', null),
+        mk(2, 'search', 'localhost:8702', 'allowed', 'shape.length', 'query too long'),
+        mk(3, 'search', '[::1]:8702', 'allowed', 'provenance.rare_term', 'rare memo term'),
+        mk(4, 'reader', 'api.anthropic.com', 'allowed', 'canary', 'canary token'),
+        mk(5, 'search', 'api.tavily.com', 'blocked', 'gate.path_not_allowed', 'path not allowed'),
+      ];
+      const sum = O.summarize(rows);
+      const line = O.summaryText(sum);
+      const check = O.check(sum);
+      ok('synthetic: singular nouns', has(line, '1 page read to api.tavily.com') && has(line, '1 reading job to api.anthropic.com'), line);
+      ok('synthetic: localhost and ::1 stay on this device', has(line, 'stayed on this device): 1 search query to localhost:8702, 1 search query to [::1]:8702.'), line);
+      ok('synthetic: canary counts as yes', check.verdict === 'yes' && has(check.text, 'canary token') && has(check.text, '1 of 4 sent requests'), check.text);
+      ok('synthetic: shape.* is not a secret', !has(check.text, 'shape.length'), check.text);
+      ok('synthetic: provenance shown separately', has(check.text, 'provenance.rare_term'), check.text);
+      ok('synthetic: gate block not counted as a secret block', !has(check.text, 'Blocked before sending'), check.text);
+      ok('synthetic: time is HH:MM:SS', sum.attempts[0].time === '23:41:07', sum.attempts[0].time);
+    }
+
+    // ---------- the Outbound panel in the page ----------
+    {
+      const doc = await load('at=22300&theme=console');
+      const panel = doc.getElementById('outbound');
+      ok('panel visible in the console theme', visible(doc, panel), 'not visible');
+      const rows = doc.querySelectorAll('#ob-rows tr.ob-row');
+      ok('panel: one row per attempt (compromised)', rows.length === 2, `${rows.length}`);
+      const expected = O.summarize(sessions.s_compromised1);
+      ok('panel: summary line is computed', doc.getElementById('ob-summary').textContent === O.summaryText(expected), doc.getElementById('ob-summary').textContent);
+      ok('panel: check line is computed', doc.getElementById('ob-check').textContent === O.check(expected).text, doc.getElementById('ob-check').textContent);
+      ok('panel: leak decision marked', !!doc.querySelector('#ob-rows tr.ob-row.leak'), 'no .leak row');
+      ok('panel: fits 1280x720 (no page scroll)', doc.documentElement.scrollHeight <= 720 + 1, `${doc.documentElement.scrollHeight}`);
+    }
+    {
+      const doc = await load('at=54500&theme=console');
+      const expected = O.summarize(sessions.s_dtfake1);
+      ok('panel: doublethink says no', doc.getElementById('ob-check').textContent === O.check(expected).text && O.check(expected).verdict === 'no', doc.getElementById('ob-check').textContent);
+    }
+    {
+      const doc = await load('at=88000&theme=console');
+      const panel = doc.getElementById('outbound');
+      ok('panel: careless block row', doc.querySelectorAll('#ob-rows tr.ob-row.blocked').length === 1, 'no blocked row');
+      ok('panel: shows no query text', !has(panel.textContent, 'Ossory') && !has(panel.textContent, 'Brackwater'), panel.textContent);
+    }
+    {
+      const doc = await load('at=106500&theme=console');
+      ok('panel: follows the verified run in the proof beat', doc.getElementById('ob-summary').textContent === O.summaryText(O.summarize(sessions.s_dtreal1)), doc.getElementById('ob-summary').textContent);
+    }
+    // ---------- results screen: runs chosen by the data, never by position (Ilia's check) ----------
+    {
+      const R = window.Results;
+      const three = await (await fetch('fixtures/results_three_runs.json', { cache: 'no-store' })).json();
+      const sel = R.select(three);
+      const from = Object.fromEntries(sel.modes.map((m) => [m.key, m.index]));
+      ok('three runs: single_agent from the rejudged-frozen run', from.single_agent === 1 && three.runs[1].label === 'checks-frozen rejudged-frozen', JSON.stringify(from));
+      ok('three runs: compromised from the rejudged-frozen run', from.compromised === 1, JSON.stringify(from));
+      ok('three runs: two_minds and doublethink from the batch 2 run', from.two_minds === 2 && from.doublethink === 2, JSON.stringify(from));
+      ok('three runs: the fallback run is excluded', sel.excluded.length === 1 && sel.excluded[0].index === 0 && /fallback/.test(sel.excluded[0].reason), JSON.stringify(sel.excluded));
+      ok('three runs: extras never come from the fallback run', [sel.falseBlocks, sel.usefulness, sel.secondsPerQuestion, sel.creditsPerQuestion].every((x) => x === null), 'an extra came from run 0');
+
+      const box = document.createElement('section');
+      R.render(box, three, { example: false, source: '/shared/results/results.json' });
+      const text = box.textContent;
+      const values = Object.fromEntries([...box.querySelectorAll('.bv')].map((n) => [n.dataset.mode, n.textContent.trim()]));
+      ok('three runs: bar values from the right runs', values.single_agent === '2 / 40' && values.compromised === '40 / 40' && values.two_minds === '0 / 40' && values.doublethink === '0 / 40', JSON.stringify(values));
+      const fallbackNumbers = ['1 / 40', '39 / 40', '13 / 30', '17 / 30', '5.32', '9.75'].filter((n) => text.includes(n));
+      ok('three runs: none of the fallback run\'s numbers appear', fallbackNumbers.length === 0, fallbackNumbers.join(', '));
+      const src = [...box.querySelectorAll('.run-sources li[data-run]')].map((li) => li.textContent);
+      ok('three runs: each number names its run under the bars',
+        src.length === 2 && has(src[0], 'single agent, compromised agent') && has(src[0], 'run 2 of 3') && has(src[0], '“checks-frozen rejudged-frozen”')
+        && has(src[1], 'two minds, two minds + gate') && has(src[1], 'run 3 of 3') && has(src[1], 'commit c303c1c'), JSON.stringify(src));
+      ok('three runs: the excluded run is named as left out, without numbers', has(text, 'Not shown: run 1 of 3 (scored with the fallback judge)'), text.slice(-300));
+      ok('three runs: no example label on measured data', !box.querySelector('.example-tag, .example-banner'), 'example label found');
+
+      // A run without the frozen detector flag, and a judge field named leak_judge, are handled the same way.
+      const variant = JSON.parse(JSON.stringify(three));
+      variant.runs[1].leak_judge = 'FALLBACK exact substring';
+      delete variant.runs[2].detector;
+      const v = R.select(variant);
+      ok('leak_judge FALLBACK and a missing detector both exclude a run', v.modes.every((m) => m.index === null) && v.excluded.length === 3, JSON.stringify(v.modes.map((m) => m.index)));
+    }
+    // ---------- results screen: never example data unless ?example=1 (Ilia's must-fix) ----------
+    {
+      const head = await fetch('/shared/results/results.json', { cache: 'no-store' });
+      const exampleLoads = (doc) => doc.defaultView.performance.getEntriesByType('resource')
+        .filter((e) => e.name.includes('results_example.json')).length;
+      if (head.status === 404) {
+        for (const th of ['console', '1984']) {
+          const doc = await load(`at=125000&theme=${th}`);
+          const box = doc.getElementById('results');
+          const text = box.textContent;
+          ok(`missing results.json: "No measured results yet" (${th})`, box.classList.contains('open') && has(text, 'No measured results yet'), text.slice(0, 200));
+          ok(`missing results.json: no numbers, no bars (${th})`, !box.querySelector('.bars, .track, .bv, .big') && !/\d+\s*\/\s*\d+/.test(text) && !has(text, 'attacks'), text.slice(0, 200));
+          // Neither the old banner text nor the new label may appear; the hint "with example data" may.
+          ok(`missing results.json: example never shown or fetched (${th})`, !has(text, 'EXAMPLE DATA') && !box.querySelector('.example-banner, .example-tag') && exampleLoads(doc) === 0, `${exampleLoads(doc)} example fetches; text: ${text.slice(0, 120)}`);
+          ok(`missing results.json: says how to preview (${th})`, has(text, '?example=1'), text.slice(0, 300));
+        }
+      } else {
+        out.push('SKIP missing-file case: /shared/results/results.json exists on this checkout');
+        const doc = await load('at=125000&theme=console');
+        ok('results.json present: example file not fetched without ?example=1', exampleLoads(doc) === 0, `${exampleLoads(doc)} example fetches`);
+      }
+      // Explicit ?example=1: the example file, a large label at the top and on every number.
+      const doc = await load('at=125000&theme=console&example=1');
+      const box = doc.getElementById('results');
+      const label = 'EXAMPLE DATA, not measured';
+      const banner = box.querySelector('.example-banner');
+      ok('?example=1: large banner', !!banner && has(banner.textContent, label) && parseFloat(doc.defaultView.getComputedStyle(banner).fontSize) >= 24, banner ? doc.defaultView.getComputedStyle(banner).fontSize : 'no banner');
+      const numbers = [...box.querySelectorAll('[data-num]')];
+      const unlabelled = numbers.filter((n) => !n.querySelector('.example-tag') || !has(n.querySelector('.example-tag').textContent, label));
+      ok('?example=1: every number carries the label', numbers.length >= 7 && unlabelled.length === 0, `${numbers.length} numbers, ${unlabelled.length} unlabelled`);
+      const tagSize = numbers.length ? parseFloat(doc.defaultView.getComputedStyle(numbers[0].querySelector('.example-tag')).fontSize) : 0;
+      ok('?example=1: the label is large (>= 18px)', tagSize >= 18, `${tagSize}px`);
+      ok('?example=1: only the example file was fetched', exampleLoads(doc) === 1, `${exampleLoads(doc)}`);
+    }
+    {
+      // The results screen still covers the Outbound strip and the footer (grid rows 2 to 4).
+      const doc = await load('at=125000&theme=console');
+      const res = doc.getElementById('results');
+      const r = res.getBoundingClientRect();
+      const ob = doc.getElementById('outbound').getBoundingClientRect();
+      ok('results screen covers the Outbound strip', res.classList.contains('open') && r.top <= ob.top && r.bottom >= ob.bottom, `${r.top}-${r.bottom} vs ${ob.top}-${ob.bottom}`);
+    }
+    {
+      const doc = await load('at=22300&theme=1984');
+      ok('panel hidden in the 1984 theme', !visible(doc, doc.getElementById('outbound')), 'visible');
+      ok('1984 footer still visible', visible(doc, doc.querySelector('footer.bottom')), 'footer hidden');
+    }
+
+    // ---------- regression: the four fixes on main ----------
+    // 1. The canary is never rendered, at any event time, in either theme.
+    const canaries = [...new Set(events.filter((e) => e.type === 'memo_loaded').map((e) => e.data.canary).filter(Boolean))];
+    const times = [...new Set(events.map((e) => e.t_ms))];
+    let canarySeen = [];
+    for (const t of times) {
+      const doc = await load(`at=${Math.max(1, t)}&theme=console`);
+      const html = doc.documentElement.outerHTML;
+      for (const c of canaries) if (html.includes(c)) canarySeen.push(`${t}:${c}`);
+    }
+    for (const t of times.filter((_, i) => i % 6 === 0)) {
+      const doc = await load(`at=${Math.max(1, t)}&theme=1984`);
+      const html = doc.documentElement.outerHTML;
+      for (const c of canaries) if (html.includes(c)) canarySeen.push(`1984 ${t}:${c}`);
+    }
+    ok(`canary never in the DOM (${times.length} seeks, ${canaries.length} canaries)`, canaries.length > 0 && canarySeen.length === 0, canarySeen.join(', '));
+
+    // 2. A run's memo is never in the DOM before that run's parties_confirmed (identified by its own sha256),
+    //    and no memo panel ever holds a confirmed secret in clear text before it is confirmed.
+    for (const m of events.filter((e) => e.type === 'memo_loaded')) {
+      const parties = events.find((e) => e.type === 'parties_confirmed' && e.session_id === m.session_id);
+      const doc = await load(`at=${m.t_ms}&theme=console`);
+      const html = doc.documentElement.outerHTML;
+      const panels = ['dossier', 'agent-dossier'].map((id) => doc.getElementById(id).outerHTML).join('');
+      const secrets = parties.data.confirmed_secrets.flatMap((g) => g.values);
+      const clear = secrets.filter((v) => panels.includes(v));
+      ok(`memo absent before parties_confirmed (${m.session_id})`,
+        parties.t_ms > m.t_ms && !html.includes(m.data.sha256) && clear.length === 0,
+        html.includes(m.data.sha256) ? 'this run\'s memo is in the DOM' : `clear secrets in a memo panel: ${clear.join(', ')}`);
+    }
+
+    // 3. Tampered rows show only the failure (both themes).
+    for (const th of ['console', '1984']) {
+      const doc = await load(`at=113500&theme=${th}`);
+      const broken = [...doc.querySelectorAll('#ledger li.broken')];
+      const allowedShown = broken.filter((li) => [...li.querySelectorAll('.status.allowed, .mark.ok')].some((n) => visible(doc, n)));
+      ok(`tampered rows show only the failure (${th})`, broken.length > 0 && allowedShown.length === 0, `${broken.length} broken, ${allowedShown.length} with an allowed mark`);
+    }
+
+    // 4. Reader job summaries count documents from docs_read; typed facts appear once per run.
+    {
+      const doc = await load('at=80000&theme=console');
+      const reads = events.filter((e) => e.type === 'docs_read' && e.session_id === 's_dtreal1');
+      const jobs = [...doc.querySelectorAll('#reader-body .job')];
+      const bad = jobs.filter((j) => {
+        const ev = reads.find((r) => r.data.job === j.dataset.job);
+        const summary = j.querySelector('.job-summary').textContent;
+        return !ev || Number(j.dataset.docs) !== ev.data.docs.length || (summary.includes('documents read') && !summary.includes(`${ev.data.docs.length} documents read`));
+      });
+      ok('reader job counts come from docs_read', jobs.length === reads.length && bad.length === 0, `${jobs.length} jobs, ${bad.length} wrong`);
+      const needs = [...doc.querySelectorAll('#typed > li')];
+      const dupes = needs.filter((li) => {
+        const chips = [...li.querySelectorAll('.chip')].map((c) => c.textContent);
+        return new Set(chips).size !== chips.length;
+      });
+      ok('typed facts appear once per run', needs.length > 0 && dupes.length === 0, `${dupes.length} needs with duplicates`);
+    }
+  } catch (e) {
+    fail += 1;
+    out.push(`FAIL harness: ${e && e.message}`);
+  }
+  out.push(`DONE pass=${pass} fail=${fail}`);
+  document.getElementById('result').textContent = out.join('\n');
+})();
+</script>
+</body>
+</html>

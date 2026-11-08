@@ -107,6 +107,33 @@ The usual fixes do not close this:
 - A session exports as a bundle signed with Ed25519. A standalone verifier checks it offline; change one byte and
   it says INVALID.
 
+## Quickstart for judges
+
+1. Install Ollama from https://ollama.com and start it (open the app, or run `ollama serve`).
+2. Pull the Planner model: `ollama pull qwen3:8b`.
+3. Set up Python and the `.env` file:
+
+   ```bash
+   python3 -m venv .venv && source .venv/bin/activate
+   pip install cryptography
+   cp .env.example .env
+   ```
+
+   `.env` must keep `OLLAMA_PORT=11434` and `OLLAMA_MODEL=qwen3:8b`: the Planner reads its model only from `.env`,
+   and the loopback guard takes the Ollama port from it, so the app refuses to start without them.
+4. Start everything with `python3 -m app.run` and open the address it prints.
+
+What needs which keys:
+
+| What | API keys needed |
+|---|---|
+| Recorded replay: add `&replay=1` to the printed address | none |
+| Single agent on the fake source (local Tavily stand-in) | none |
+| Doublethink, fake or real source | `ANTHROPIC_API_KEY` (the Reader is Claude, even on the fake source); real source also `TAVILY_API_KEY` |
+
+To measure usefulness and cost, run `python3 -m eval.usefulness` first (it writes the per-question details file),
+then `python3 -m eval.cost` (it reads that file). Both are in the table under "How to run".
+
 ## How to run
 
 Requirements: Python 3.11 or newer, the `cryptography` package, Ollama with the Planner model (`qwen3:8b` on the
@@ -118,7 +145,7 @@ pip install cryptography
 ollama pull qwen3:8b
 ```
 
-Create `.env` in the repo folder (never commit it; [.env.example not added yet]). The Gate and the Planner read it
+Create `.env` in the repo folder (never commit it; `cp .env.example .env` gives the key names). The Gate and the Planner read it
 directly, not from the shell environment:
 
 ```
@@ -127,8 +154,12 @@ ANTHROPIC_API_KEY=...
 APP_PORT=8700
 GATE_PORT=8701
 FAKE_TAVILY_PORT=8702
+OLLAMA_PORT=11434
 OLLAMA_MODEL=qwen3:8b
 ```
+
+Both Ollama lines are required: the Planner reads its model only from `.env`, and the loopback guard takes the
+Ollama port from `.env`, so the app and the red team refuse to start without them.
 
 Warning: `app.run` and `fake_tavily` read the shell environment before `.env`; the Gate and the Planner read
 only `.env`. A stray `GATE_PORT` in the shell therefore wins: `app.run` talks to that port while the Gate it
@@ -199,6 +230,11 @@ Only what we measure:
 - **The record is self-attested.** The ledger proves what this install logged, not what code ran.
 - **The research target is named** when you research it; the deal around it is what stays private.
 - **A compromised laptop** is out of scope.
+
+## Rules we followed
+
+- `.claude/settings.json` blocks Claude from reading an older personal project folder, so all code here was written
+  during the hackathon.
 
 ## Prior art
 

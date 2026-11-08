@@ -350,9 +350,42 @@
     } else t.textContent = '—';
   }
 
-  // Everything that describes one run follows the ledger: answer bar, counters, badge, gate header.
+  // ---------- Outbound panel (console theme): logic in outbound.js, numbers from the ledger events only ----------
+  function renderOutbound(sid) {
+    if (sid !== S.view) return;
+    const s = sid ? S.sessions[sid] : null;
+    const O = window.Outbound;
+    if (!O) return;
+    const sum = O.summarize(s ? s.rows : []);
+    const rows = sum.attempts.map((a) => {
+      const leak = a.decision === 'sent' && O.isSecretRule(a.rule);
+      const cls = `ob-row ${a.decision}${leak ? ' leak' : ''}`;
+      return el('tr', { class: cls },
+        el('td', { class: 'mono' }, a.time),
+        el('td', { class: 'mono ob-host', title: a.host }, a.host),
+        el('td', null, O.kindLabel(a.kind)),
+        el('td', null, el('span', { class: `ob-decision ${a.decision}${leak ? ' leak' : ''}` }, a.decision === 'blocked' ? 'Blocked' : 'Sent')),
+        el('td', null, a.rule
+          ? el('span', { class: `ob-rule mono${a.decision === 'blocked' || leak ? ' bad' : ''}`, title: a.detail || a.rule }, a.rule)
+          : el('span', { class: 'ob-none' }, '—')));
+    });
+    fill($('#ob-rows'), rows.length ? rows : el('tr', { class: 'ob-empty' }, el('td', { colspan: '5' }, 'No outbound attempts yet.')));
+    fill($('#ob-run'), sid ? el('span', { class: 'mono' }, sid) : []);
+    $('#ob-summary').textContent = O.summaryText(sum);
+    const c = O.check(sum);
+    const line = $('#ob-check');
+    // Only the verdict carries red (yes) or green (no); notes such as a block stay neutral.
+    fill(line, [el('span', { class: 'ob-verdict' }, c.verdictText),
+      c.notes.length ? el('span', { class: 'ob-notes' }, ` ${c.notes.join(' ')}`) : null]);
+    line.className = `ob-check ${c.verdict}`;
+    const sc = $('#ob-scroll');
+    sc.scrollTop = sc.scrollHeight;   // the newest attempt is always in view
+  }
+
+  // Everything that describes one run follows the ledger: answer bar, counters, badge, gate header, Outbound.
   function showRunSummary(sid, animate = false) {
     renderAnswerBar(sid);
+    renderOutbound(sid);
     renderCounters(sid, animate);
     renderBadge();
     renderGateHead();
@@ -796,75 +829,66 @@
     return r.json();
   }
 
+  // Results (FORMATS §9). Measured numbers come only from /shared/results/results.json. There is no silent fallback:
+  // example data is loaded only when the URL says ?example=1, and then every number is labelled as example data.
+  const EXAMPLE_MODE = params.get('example') === '1';
+  let resultsState = 'loading';   // 'measured' | 'example' | 'missing' | 'not-measured' | 'error'
+  let resultsError = '';
+
   async function loadResults() {
-    try {
-      results = await fetchJSON(RESULTS_REAL);
-      resultsSource = RESULTS_REAL;
-    } catch (_) {
+    results = null;
+    resultsError = '';
+    if (EXAMPLE_MODE) {
       try {
         results = await fetchJSON(RESULTS_EXAMPLE);
         resultsSource = RESULTS_EXAMPLE;
+        resultsState = 'example';
       } catch (e) {
-        results = null;
-        resultsSource = String(e.message || e);
+        resultsState = 'error';
+        resultsError = String(e.message || e);
       }
+      return;
     }
+    try {
+      const r = await fetch(RESULTS_REAL, { cache: 'no-store' });
+      if (r.status === 404) { resultsState = 'missing'; return; }
+      if (!r.ok) throw new Error(`${RESULTS_REAL}: HTTP ${r.status}`);
+      const data = await r.json();
+      resultsSource = RESULTS_REAL;
+      // A results.json that is itself marked as example data is not a measurement either.
+      if (data && data.example) { resultsState = 'not-measured'; return; }
+      results = data;
+      resultsState = 'measured';
+    } catch (e) {
+      resultsState = 'error';
+      resultsError = String(e.message || e);
+    }
+  }
+
+  function renderNoResults(box) {
+    const why = {
+      loading: 'The results file is still loading.',
+      missing: `${RESULTS_REAL} does not exist yet. Measured numbers appear here once the red-team run writes it.`,
+      'not-measured': `${RESULTS_REAL} is marked as example data, so it is not shown as a measurement.`,
+      error: `The results file could not be read: ${resultsError}.`,
+    }[resultsState] || 'No results file.';
+    fill(box, [
+      el('div', { class: 'no-results' },
+        el('h2', { id: 'results-title', class: 'results-title' }, 'No measured results yet'),
+        el('p', { class: 'no-results-why' }, why),
+        el('p', { class: 'smallprint' }, 'To preview the layout with example data, open the page with ',
+          el('code', null, '?example=1'), '. Every number is then labelled as example data.'))]);
   }
 
   function renderResults() {
     const box = $('#results');
-    if (!results || !Array.isArray(results.runs) || results.runs.length === 0) {
-      fill(box, [el('h2', { id: 'results-title', class: 'results-title' }, 'Results file not found.'),
-        el('p', { class: 'smallprint' }, `Tried ${RESULTS_REAL} and ${RESULTS_EXAMPLE}.`)]);
+    const usable = results && Array.isArray(results.runs) && results.runs.length > 0;
+    if (!usable || (resultsState !== 'measured' && resultsState !== 'example')) {
+      renderNoResults(box);
       return;
     }
-    const runs = results.runs;
-    const run = runs[runs.length - 1];
-    const frozen = runs.length > 1 ? runs[0] : null;
-    const bars = [
-      ['single agent', 'single_agent'],
-      ['compromised agent', 'compromised'],
-      ['two minds', 'two_minds'],
-      ['two minds + gate', 'doublethink'],
-    ];
-    const grid = el('div', { class: 'bars' });
-    for (const [label, key] of bars) {
-      const m = (run.modes || {})[key];
-      const track = el('div', { class: 'track', 'aria-hidden': 'true' });
-      if (m && m.runs) {
-        const f = el('div', { class: 'fill' });
-        f.style.width = `${(100 * m.leaked) / m.runs}%`;
-        track.append(f);
-        const fr = frozen && (frozen.modes || {})[key];
-        if (fr && fr.runs) {
-          const tick = el('div', { class: 'tick' });
-          tick.style.left = `${(100 * fr.leaked) / fr.runs}%`;
-          track.append(tick);
-        }
-      }
-      grid.append(el('div', { class: 'bl' }, label), track,
-        el('div', { class: 'bv' }, m ? `${m.leaked} / ${m.runs}` : 'not run'));
-    }
-    const fb = run.false_blocks;
-    const byRule = fb && fb.by_rule ? Object.entries(fb.by_rule).map(([k, v]) => `${k} ${v}`).join(', ') : '';
-    const u = run.usefulness;
-    const c = run.cost || {};
-    const nm = (v) => (v == null ? 'not measured' : String(v));
-    fill(box, [
-      results.example ? el('div', { class: 'banner', role: 'note' }, results.banner || 'EXAMPLE DATA') : null,
-      el('h2', { id: 'results-title', class: 'results-title' },
-        el('span', { class: 'big' }, String(results.attacks_total)), 'attacks, written and hashed before the code.'),
-      el('p', { class: 'sha' }, `attack file sha256 ${shortHash(results.attack_file_sha256)}`),
-      el('p', { class: 'smallprint', style: 'margin:0 0 0.75rem' }, 'Leaks per setup'),
-      grid,
-      frozen ? el('p', { class: 'smallprint' }, `| = ${frozen.label} run`) : null,
-      fb ? el('p', { class: 'fb' }, 'False blocks on normal questions: ',
-        el('span', { class: fb.blocked > 0 ? 'bad' : '' }, `${fb.blocked} / ${fb.total}`),
-        byRule ? el('span', { class: 'smallprint' }, `  ${byRule}`) : null) : null,
-      el('p', { class: 'smallprint' }, `run ${run.label} · commit ${run.commit} · planner ${run.planner_model} · source ${run.source}`),
-      u ? el('p', { class: 'smallprint' }, `answered with a cited number ${u.answered_with_cited_number} / ${u.total}`) : null,
-      el('p', { class: 'smallprint' }, `Tavily credits per question ${nm(c.tavily_credits_per_question)} · seconds per question ${nm(c.seconds_per_question)}`),
-      el('p', { class: 'smallprint' }, `from ${resultsSource}`)]);
+    // Which run feeds which number is decided by the data (ui/results.js), never by position in runs[].
+    window.Results.render(box, results, { example: resultsState === 'example', source: resultsSource });
   }
 
   function setScreen(screen) {
@@ -949,17 +973,21 @@
 
       // The moment: packet, red wall flash, stamp, counter tick, eye. None of it delays the replay.
       if (animate && kind !== 'result') launchPacket(li, row, kind);
+      // The Outbound panel changes with the counters, so a leak or a block never shows there before its moment.
       if (kind === 'blocked') {
         if (animate) {
           later(flashExit, 0);
-          later(() => renderCounters(sid, true), T.blockStamp);
+          later(() => { renderCounters(sid, true); renderOutbound(sid); }, T.blockStamp);
           later(() => renderIncident(sid, true), T.blockRed);
-        } else { renderCounters(sid, false); renderIncident(sid, false); }
+        } else { renderCounters(sid, false); renderIncident(sid, false); renderOutbound(sid); }
       } else if (kind === 'leak') {
         if (animate) {
-          later(() => { renderCounters(sid, true); setEye(true, true); renderIncident(sid, true); }, T.leakStamp);
-        } else { renderCounters(sid, false); setEye(true, true); renderIncident(sid, false); }
-      } else renderCounters(sid, animate);
+          later(() => { renderCounters(sid, true); setEye(true, true); renderIncident(sid, true); renderOutbound(sid); }, T.leakStamp);
+        } else { renderCounters(sid, false); setEye(true, true); renderIncident(sid, false); renderOutbound(sid); }
+      } else {
+        renderCounters(sid, animate);
+        renderOutbound(sid);
+      }
     },
 
     blocked(env, o) {
@@ -979,7 +1007,7 @@
       }
       if (env.data.planted && !li.querySelector('.tag')) li.insertBefore(plantedTag(), li.querySelector('.slip-foot'));
       renderIncident(sid, false);
-      if (o && o.instant) scrollLedger();
+      if (o && o.instant) { scrollLedger(); renderOutbound(sid); }   // animated: the block moment redraws it
     },
 
     docs_read(env, o) {
