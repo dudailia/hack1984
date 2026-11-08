@@ -14,7 +14,7 @@ import reader
 from reader.schema import CLAIM_UNITS
 
 from gate.errors import ApiError
-from gate.pipeline import ANTHROPIC
+from gate.pipeline import ANTHROPIC, GateConfigError
 from gate.tavily import check_ids, split_ids
 
 R_READER_ERROR = "gate.reader_error"
@@ -37,6 +37,16 @@ def build_job(session, state, job_id, known_ids, claim_types, public_query):
 
 def _empty(need):
     return {"need": need, "found": False, "values": []}
+
+
+def failure_reason(http_status, transport_error):
+    """(error code, human detail) for a reader request that was sent but did not succeed. Built only from fixed
+    text, the HTTP status and the exception type name: never keys, headers, payloads or response bodies."""
+    if http_status in (401, 403):
+        return "reader_auth_failed", "Reader auth failed: %d" % http_status
+    if http_status is None:
+        return "reader_unreachable", "Reader unreachable: %s" % (transport_error or "no response")
+    return "reader_http_error", "Reader answered HTTP %d" % http_status
 
 
 def _typed(need, kept, job):
@@ -84,8 +94,11 @@ def read(pipeline, session_id, need, result_ids, claim_types):
             return resp  # nothing attempted, nothing sent, no job id spent
 
         # sent exactly as returned: the pipeline serializes it canonically once and adds nothing.
-        # GateConfigError (missing key) propagates from here before any row, and no job id is spent.
-        out = pipeline.send(session_id, "reader", "reader", ANTHROPIC, "/v1/messages", body, pre_rule=pre_rule)
+        # A missing key is found before any row, so nothing is ledgered and no job id is spent.
+        try:
+            out = pipeline.send(session_id, "reader", "reader", ANTHROPIC, "/v1/messages", body, pre_rule=pre_rule)
+        except GateConfigError:
+            raise ApiError(503, "reader_key_missing", "ANTHROPIC_API_KEY not set") from None
         state.next_job_n += 1
         resp.update(status=out["status"], rule=out["rule"], ledger_seq=out["ledger_seq"], ledger=out["rows"],
                     job=job_id)
@@ -94,6 +107,8 @@ def read(pipeline, session_id, need, result_ids, claim_types):
             resp["detail"] = out["detail"]
             return resp
         if out["status"] != "sent":
+            # sent but failed: say why (the ledger rows stay exactly as §7 has them; the reason is only here)
+            resp["error"], resp["detail"] = failure_reason(out["http_status"], out.get("transport_error"))
             return resp
 
         try:

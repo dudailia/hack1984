@@ -59,14 +59,38 @@ class GateError(Exception):
         return rows if isinstance(rows, list) and rows else None
 
 
+# The Reader cannot work at all: retrying wastes the run, so these end it at once with a reason.
+FATAL_READER_CODES = frozenset(("reader_key_missing", "reader_auth_failed"))
+READER_SSL_FAILURE = "Reader unreachable: SSLCertVerificationError"  # gate/read.py's exact detail for it
+
+
+def fatal_reader_error(e):
+    """reader_key_missing, reader_auth_failed (401/403) or an SSL certificate failure reaching Anthropic.
+    Timeouts, 429 and upstream 5xx (reader_unreachable with another type, reader_http_error) stay recoverable."""
+    return isinstance(e, GateError) and (e.code in FATAL_READER_CODES or
+                                         (e.code == "reader_unreachable" and e.detail == READER_SSL_FAILURE))
+
+
+def failure_reason(e):
+    """run_done.reason for a run that failed. The Gate's reader details are already human ("Reader auth failed:
+    401"); other Gate errors give "code: detail"; anything else only its exception type (a message could carry
+    model output)."""
+    if isinstance(e, GateError):
+        if e.code.startswith("reader_") and e.detail:
+            return e.detail
+        return "%s: %s" % (e.code, e.detail) if e.detail else e.code
+    return type(e).__name__
+
+
 def recoverable(e):
     """Skip the action and keep the run for
     - a Gate 4xx, except a session error (unknown_session);
     - an upstream failure: HTTP 200 with "status": "error" and ledger rows, i.e. the Gate sent the payload and
-      Tavily or Anthropic failed (its rows are emitted before this is asked).
+      Tavily or Anthropic failed (its rows are emitted before this is asked), unless the Reader cannot work at all
+      (fatal_reader_error).
     A 5xx from the Gate itself, no HTTP answer (connection failure), an unreadable reply or a session error ends
     the run."""
-    if not isinstance(e, GateError) or e.code == "unknown_session":
+    if not isinstance(e, GateError) or e.code == "unknown_session" or fatal_reader_error(e):
         return False
     if type(e.status) is int:
         return 400 <= e.status < 500
@@ -416,7 +440,7 @@ class _Run:
         self.baseline_runs[self.mode](self.spec, _BaselineGate(self.gate, self.mode, on_error_rows=show), on_step)
         self.budget_hit = True
 
-    def summary(self, outcome_error):
+    def summary(self, outcome_error, reason=None):
         attempts = [r for r in self.rows if r.get("row_type") == "attempt"]
         leaks = sum(1 for r in attempts if r.get("decision") == "allowed" and is_leak_rule(r.get("rule")))
         blocked = sum(1 for r in attempts if r.get("decision") == "blocked")
@@ -431,13 +455,15 @@ class _Run:
         else:
             outcome = "budget"
         credits = sum(r["credits_used"] for r in self.rows if type(r.get("credits_used")) is int)
+        # reason: why the run failed (a string), null when it did not
         return {"outcome": outcome, "source": self.source, "credits_total": credits, "leaks": leaks,
-                "blocked": blocked, "head": self.rows[-1].get("hash") if self.rows else None}
+                "blocked": blocked, "head": self.rows[-1].get("hash") if self.rows else None,
+                "reason": (reason or "error") if outcome_error else None}
 
 
 def _thread_main(run, started):
     global _active
-    error = False
+    error, reason = False, None
     try:
         run.opening()
         if run.mode in BASELINE_MODES:
@@ -445,17 +471,17 @@ def _thread_main(run, started):
         else:
             run.two_minds()
     except Exception as e:  # noqa: BLE001 - any failure ends the run with outcome error
-        error = True
-        print("app.loop: run %s failed: %s" % (run.sid, type(e).__name__), file=sys.stderr)
+        error, reason = True, failure_reason(e)
+        print("app.loop: run %s failed: %s" % (run.sid, reason), file=sys.stderr)
     finally:
         if run.mode not in BASELINE_MODES:
             try:
                 run.answer()  # always compose from what was found, also after a fatal error
             except Exception as e:  # noqa: BLE001
-                error = True
+                error, reason = True, reason or "compose failed: %s" % type(e).__name__
                 print("app.loop: run %s compose failed: %s" % (run.sid, type(e).__name__), file=sys.stderr)
         try:
-            data = run.summary(error)
+            data = run.summary(error, reason)
             data["seconds"] = round(time.monotonic() - started, 1)
             run.emit("run_done", data)
         except Exception as e:  # noqa: BLE001

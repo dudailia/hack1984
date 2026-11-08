@@ -49,17 +49,24 @@ class StubGate:
                 raise err
 
     def _maybe_upstream_fail(self, sid, kind, arg, component, dest, rule=None):
-        if self.upstream_fail is None or not self.upstream_fail(kind, arg):
+        """upstream_fail(kind, arg) -> falsy, True (anonymous failure, HTTP 432) or (error, detail, http_status)
+        as the Gate's /v1/read now reports them."""
+        res = self.upstream_fail(kind, arg) if self.upstream_fail is not None else None
+        if not res:
             return
+        code, detail, http = res if isinstance(res, tuple) else (None, None, 432)
         a = self._attempt(sid, component, kind, dest, "allowed", rule)
-        r = self._row(sid, row_type="result", attempt_seq=a["seq"], status="error", http_status=432,
+        r = self._row(sid, row_type="result", attempt_seq=a["seq"], status="error", http_status=http,
                       credits_used=None, response_commitment="ef" * 32)
         reply = {"status": "error", "rule": rule, "ledger_seq": a["seq"], "result_ids": [], "credits_used": 0,
                  "ledger": [a, r]}
         if kind == "reader":
             reply.update(job="j_%02d" % self.next_job, typed={"need": "x", "found": False, "values": []},
                          claims=[], dropped=[], sources={}, docs=[])
-        raise loop.GateError("http_200", None, status=None, reply=reply)  # what GateClient._post raises
+        if code:
+            reply.update(error=code, detail=detail)
+        # what GateClient._post raises for an HTTP 200 reply with "status": "error"
+        raise loop.GateError(reply.get("error") or "http_200", reply.get("detail"), status=None, reply=reply)
 
     def _tick(self):
         if self.fail_on_call is not None and len(self.calls) >= self.fail_on_call:
@@ -776,6 +783,86 @@ class TestErrorRepliesWithRows(Base):
         g = StubGate(error_for=lambda kind, arg: err("internal", 500) if arg == Q2 else None)
         rec = self.run_loop(planner=Script(search(q=Q1), search(q=Q2)), gate=g)
         self.assertEqual(len(self.rows(rec)), 4, "only Q1's search and read rows")
+
+
+class TestReaderFailureReasons(Base):
+    """A Reader that cannot work ends the run at once with a reason; transient Reader failures stay recoverable."""
+
+    FIRST_READ = ("r_01", "r_02")
+
+    def reader_fails(self, code, detail, http):
+        return StubGate(upstream_fail=lambda kind, arg: (code, detail, http)
+                        if (kind, arg) == ("reader", self.FIRST_READ) else None)
+
+    def assert_fatal(self, gate, reason):
+        p = Script(search(q=Q1), search(q=Q2), search(q=Q3))
+        rec = self.run_loop(planner=p, gate=gate)
+        done = self.run_done(rec)
+        self.assertEqual((done["outcome"], done["reason"]), ("error", reason))
+        self.assertEqual([c[3] for c in gate.gate_actions], [Q1], "the run stopped at the failed read")
+        self.assertEqual(len(p.calls), 1)
+        blob = json.dumps([c[0] for c in p.calls])
+        for s in ("reader_", "Reader", "SSL", "ANTHROPIC"):
+            self.assertNotIn(s, blob, "the Planner never sees any of this")
+        return rec
+
+    def test_auth_failed_is_fatal_with_reason(self):
+        rec = self.assert_fatal(self.reader_fails("reader_auth_failed", "Reader auth failed: 401", 401),
+                                "Reader auth failed: 401")
+        reader_rows = [d["row"] for d in rec.of("ledger_row") if d["display"]["label"] == "Reader"]
+        self.assertEqual([r["row_type"] for r in reader_rows], ["attempt", "result"], "its rows still reach the UI")
+        self.assertEqual(reader_rows[1]["http_status"], 401)
+
+    def test_ssl_certificate_failure_is_fatal_with_reason(self):
+        self.assert_fatal(self.reader_fails("reader_unreachable", "Reader unreachable: SSLCertVerificationError",
+                                            None),
+                          "Reader unreachable: SSLCertVerificationError")
+
+    def test_key_missing_is_fatal_with_reason(self):
+        g = StubGate(error_for=lambda kind, arg: loop.GateError(
+            "reader_key_missing", "ANTHROPIC_API_KEY not set", status=503,
+            reply={"status": "error", "error": "reader_key_missing", "detail": "ANTHROPIC_API_KEY not set"})
+            if kind == "read" else None)
+        self.assert_fatal(g, "ANTHROPIC_API_KEY not set")
+
+    def test_transient_reader_failures_stay_recoverable(self):
+        for code, detail, http in (("reader_unreachable", "Reader unreachable: TimeoutError", None),
+                                   ("reader_http_error", "Reader answered HTTP 429", 429),
+                                   ("reader_http_error", "Reader answered HTTP 529", 529),
+                                   ("reader_http_error", "Reader answered HTTP 500", 500)):
+            with self.subTest(detail=detail):
+                g = self.reader_fails(code, detail, http)
+                rec = self.run_loop(planner=Script(search(q=Q1), search(q=Q2)), gate=g)
+                done = self.run_done(rec)
+                self.assertEqual((done["outcome"], done["reason"]), ("answered", None))
+                self.assertEqual([c[3] for c in g.gate_actions], [Q1, Q2])
+
+    def test_reason_is_null_when_the_run_did_not_fail(self):
+        for planner, gate, outcome in ((Script(search(q=Q1)), StubGate(), "answered"),
+                                       (Script(), StubGate(), "budget"),
+                                       (Script(search(q="Ossory payments deal")), StubGate(), "blocked")):
+            with self.subTest(outcome=outcome):
+                done = self.run_done(self.run_loop(planner=planner, gate=gate))
+                self.assertEqual(done["outcome"], outcome)
+                self.assertIn("reason", done)
+                self.assertIsNone(done["reason"])
+
+    def test_other_failures_also_give_a_reason(self):
+        cases = [(StubGate(error_for=lambda k, a: err("internal", 500) if a == Q1 else None), Script(search(q=Q1)),
+                  "internal: detail " + POISON),
+                 (StubGate(error_for=lambda k, a: loop.GateError("gate_unreachable", "ConnectionRefusedError")
+                           if a == Q1 else None), Script(search(q=Q1)),
+                  "gate_unreachable: ConnectionRefusedError")]
+        for gate, planner, reason in cases:
+            with self.subTest(reason=reason):
+                done = self.run_done(self.run_loop(planner=planner, gate=gate))
+                self.assertEqual((done["outcome"], done["reason"]), ("error", reason))
+
+    def test_planner_crash_reason_is_the_type_only(self):
+        def boom(*a):
+            raise RuntimeError("model said something with zq9poison in it")
+        done = self.run_done(self.run_loop(planner=boom))
+        self.assertEqual((done["outcome"], done["reason"]), ("error", "RuntimeError"))
 
 
 class TestGateClientStatus(unittest.TestCase):
