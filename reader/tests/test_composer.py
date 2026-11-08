@@ -1,7 +1,6 @@
 import unittest
 
 import reader
-from reader import composer
 from reader.tests import fixtures as fx
 
 
@@ -21,31 +20,13 @@ def runs():
     return {sid: r for sid, r in out.items() if "answer" in r}
 
 
-def growth_reordered(answer):
-    """The recorded answer with its growth facts in the composer's current order (most recent period first; the
-    recordings predate that rule and listed them by value). Same facts, values and citations; only order moves."""
-    out = {**answer, "needs": [dict(n) for n in answer["needs"]]}
-    growth = next(n for n in out["needs"] if n["need"] == "sector_growth")
-    order = sorted(range(len(growth["items"])), key=lambda k: composer._recency(growth["items"][k], 2026),
-                   reverse=True)
-    growth["items"] = [growth["items"][k] for k in order]
-    label, _, rest = answer["text"].partition(": ")
-    sentence, dot, tail = rest.partition(". ")
-    clauses = sentence.split("; ")
-    assert len(clauses) == len(order) and growth["headline"] is None
-    out["text"] = "%s: %s%s%s" % (label, "; ".join(clauses[k] for k in order), dot, tail)
-    return out
-
-
 class ReproduceRecordedAnswers(unittest.TestCase):
     def test_both_recorded_answers_exactly(self):
         recorded = runs()
         self.assertEqual(set(recorded), {"s_dtfake1", "s_dtreal1"})
         for sid, r in recorded.items():
             got = reader.compose(r["answer"]["question"], fx.needs_with_labels(), r["kept"], r["sources"])
-            self.assertEqual(got, growth_reordered(r["answer"]), sid)
-            self.assertTrue(got["text"].startswith("Sector growth: the global payments processing market is "
-                                                   "projected to grow 9.8%"), got["text"])
+            self.assertEqual(got, r["answer"], sid)
 
     def test_formats_section_10_example(self):
         r = runs()["s_dtreal1"]

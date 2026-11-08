@@ -28,7 +28,7 @@ _SUFFIXES = {"inc", "incorporated", "corp", "corporation", "co", "company", "plc
 _SUBJECT_NUMBER = re.compile(r"[0-9]+(?:[.,][0-9]+)*")
 WITHHELD_SUBJECT = "[subject withheld]"
 _MONEY = {"usd": ("$", ""), "usd_millions": ("$", " million"), "usd_billions": ("$", " billion")}
-# Growth section: at most this many facts, most recent period first. Growth of an expense is not growth of the
+# Growth section: at most this many facts; actual figures before projections, latest period first within each. Growth of an expense is not growth of the
 # business ("Operating expense growth 9%"), so a growth claim whose subject names one is left out.
 MAX_GROWTH = 5
 _EXPENSE_SUBJECT_RE = re.compile(r"\b(?:expense|expenses|cost|costs|opex|spending)\b", re.IGNORECASE)
@@ -136,9 +136,11 @@ def _recency(item, year):
 
 
 def _growth_section(items, year):
-    """Growth facts most recent first, at most MAX_GROWTH; other claim types follow unchanged."""
-    growth = sorted((i for i in items if i["claim_type"] == "revenue_growth"),
-                    key=lambda i: _recency(i, year), reverse=True)  # stable: ties keep value order
+    """Growth facts, at most MAX_GROWTH: actual figures first, then projections (_is_forecast), each group latest
+    period first. Other claim types follow unchanged."""
+    growth = [i for i in items if i["claim_type"] == "revenue_growth"]
+    growth.sort(key=lambda i: _recency(i, year), reverse=True)  # stable: ties keep value order
+    growth.sort(key=lambda i: _is_forecast(i, year))             # stable: actuals (False) before projections
     return growth[:MAX_GROWTH] + [i for i in items if i["claim_type"] != "revenue_growth"]
 
 

@@ -1,4 +1,5 @@
-"""Composer growth section: at most 5 growth facts, most recent period first, expense subjects excluded.
+"""Composer growth section: at most 5 growth facts, actual figures before projections, latest period first within
+each group, expense subjects excluded.
 
 Fixture: 8 validated growth facts, 6 about revenue or volume and 2 about expenses. The expense facts have the
 latest period, so a cap alone would show them first; they must be excluded, not just pushed down. All fictional.
@@ -28,6 +29,8 @@ EIGHT = [
     fact("r_07", "acquirer revenue", 8.3, "2024", "Acquirer revenue grew 8.3% in 2024."),
     fact("r_08", "cross-border volumes", 11.5, "2022", "Cross-border volumes grew 11.5% in 2022."),
 ]
+PROJECTION_2026 = fact("r_09", "issuer processing revenue", 6.5, "2026",
+                       "Issuer processing revenue is expected to grow 6.5% in 2026.")
 SOURCES = {f["document_id"]: {"url": "https://%s.example.com" % f["document_id"], "title": f["document_id"]}
            for f in EIGHT}
 
@@ -41,21 +44,28 @@ class GrowthTopFiveTest(unittest.TestCase):
         self.out = compose(EIGHT)
         self.items = self.out["needs"][0]["items"]
 
-    def test_at_most_five_most_recent_first_without_expenses(self):
+    def test_at_most_five_actuals_first_latest_first_without_expenses(self):
         self.assertEqual([(i["subject"], i["period"]) for i in self.items], [
-            ("global payments market", "2025-2030"),
             ("merchant acquiring revenue", "2025"),
             ("acquirer revenue", "2024"),
             ("card volumes", "2019-2024"),
             ("payments processing revenue", "2023"),
-        ])
+            ("cross-border volumes", "2022"),
+        ], "five actuals fill the section; the 2025-2030 projection is sixth and cut")
+
+    def test_projections_after_actuals_latest_first(self):
+        facts = [f for f in EIGHT if f["document_id"] in ("r_02", "r_05", "r_07")] + [PROJECTION_2026]
+        sources = dict(SOURCES, r_09={"url": "https://r_09.example.com", "title": "r_09"})
+        items = reader.compose("q", GROWTH, facts, sources, today=TODAY)["needs"][0]["items"]
+        self.assertEqual([(i["period"], i["value"]) for i in items],
+                         [("2024", 8.3), ("2019-2024", 5), ("2025-2030", 9.8), ("2026", 6.5)])
 
     def test_text_matches_the_items(self):
         text = self.out["text"]
-        order = ["9.8%", "7.4%", "8.3%", "5%", "6.1%"]
+        order = ["7.4%", "8.3%", "5%", "6.1%", "11.5%"]
         positions = [text.index(v) for v in order]
         self.assertEqual(positions, sorted(positions), text)
-        for absent in ("11.5", "Operating expense", "costs", "r_03", "r_06", "r_08"):
+        for absent in ("9.8", "Operating expense", "costs", "r_03", "r_05", "r_06"):
             self.assertNotIn(absent, text)
 
     def test_numbers_are_the_validated_values(self):
