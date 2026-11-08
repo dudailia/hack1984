@@ -2,21 +2,27 @@
 
 Built from the deck's judging criteria. Privacy-First: what leaves the device, who can read it, can you prove it,
 would anyone use it. Most Startup-able: fundable, who is it for, would they pay, why this team. Surge: how central
-Tavily is, how well it works. Rewritten for the real estate scenario from Ilia's draft in notes/RE_PITCH.md.
+Tavily is, how well it works. Rewritten for the real estate scenario from Ilia's draft in notes/RE_PITCH.md and
+Anant's pitch and defense document (sections 1, 6, 7 and 10).
 
 Rules for this file:
 - The **spoken** answer is what we say out loud, under 40 words. Say it, then stop.
 - **If pressed** is the follow-up, only if they ask.
 - **Source** is where the answer comes from in this repo. Nothing here comes from anywhere else.
-- **Measured numbers come only from `shared/results/results.json` on main**, cited by run label and commit. The run
-  judged by the FALLBACK judge is never quoted. Anything not measured yet is [pending]. Never invent or estimate.
+- **Measured numbers come only from three sources:** `shared/results/results.json` on main (by run label and
+  commit), `shared/results/usefulness/live_blocks.md`, and the exposure check on the demo-laptop ledger (to become
+  `shared/results/exposure.md`). The run judged by the FALLBACK judge is never quoted. Anything not measured yet is
+  [pending]. Never invent or estimate.
 - **Every measured number today is from the first evaluation (corporate deal memo).** There is no real estate run
   yet, so real estate numbers are [pending]. Say "first evaluation" when quoting one.
 - **The split stopped the attacks.** The gate checks what goes out and never had to fire in the measured runs. Never
   say the gate blocked the attacks.
 - Business facts (law, fines, prices, market counts) are quoted only with their source in notes/BUSINESS.md.
-- The deal is fictional and its names wait for `shared/fixtures/re_memo.md`: [pending: property], [pending: buyer],
-  [pending: financing]. [Anant: pending] marks lines that wait for Anant's real estate defense doc.
+- **Office, Copilot, Azure, Bedrock and MCP integrations, and any integration with a deal management platform, are
+  roadmap.** Never describe them as built.
+- The deal is fictional. Its names are the ones Ilia set for the film (property "Larkmoor Wharf", buyer "Fund IV",
+  $42.5 million financing) until `shared/fixtures/re_memo.md` lands. Never name a real company or employer,
+  including the company behind Anant's co-op: say "a commercial real estate deal management platform".
 
 ---
 
@@ -46,20 +52,27 @@ Every answer below stays inside these three lists. If a question needs something
 | Compromised agent leaks | 40 of 40 | checks-frozen rejudged-frozen | 486a8b6 |
 | Two minds leaks | 0 of 40 | checks-frozen | c303c1c |
 | Two minds plus gate leaks | 0 of 40, with 0 blocked requests | checks-frozen | c303c1c |
+| Every run read the poisoned page | yes | exposure check, demo-laptop ledger (to become `shared/results/exposure.md`) | n/a |
 | False blocks on normal questions (static, frozen checks) | 0 of 30 (notes/BENIGN.md) | benign-frozen | a271959 |
 | Answered with a cited number (live, real Tavily) | 23 of 30 | usefulness | checks-frozen-80-g294c423 |
 | Cost per question (live) | 1.77 Tavily credits, 14.7 s | usefulness | checks-frozen-80-g294c423 |
+| Harmless requests blocked in the live run | 3 (questions 2, 8 and 18, rule `provenance.rare_term`; all 3 still answered) | `shared/results/usefulness/live_blocks.md` | 294c423 |
 | Any real estate number | [pending] | [pending] | [pending] |
 
 ### What is roadmap (not built: say "roadmap", never "we have")
 - Real estate claim types: cap rate, vacancy, delinquency, loan rate, cost per square foot, REIT return. Today the
   Reader extracts revenue, growth, multiples, EBITDA, market size, employees and founded year.
 - A real estate memo fixture and a real estate red-team and usefulness run.
-- Excel add-in: ask from the underwriting model, numbers come back into cells with quote and source.
-  [Anant: pending]
-- Deal-flow plug-in: read the confidential terms from the firm's pipeline tool. [Anant: pending]
-- Running the Reader through the firm's own cloud AI contract (Azure or Bedrock). This changes the Gate's exact host
-  allowlist (CLAUDE.md invariant 5), so it is a reviewed change, not a setting. [Anant: pending]
+- Office add-in: ask from where analysts already draft and model; numbers come back with quote and source. A local
+  client is not automatically private (document storage, syncing, telemetry and the host application matter), so it
+  needs a security review.
+- Integration with a commercial real estate deal management platform: invoke Doublethink locally from the deal
+  workspace, so the user does not paste the memo.
+- A provider adapter for the firm's approved cloud model (Azure OpenAI or Bedrock) instead of our Anthropic key. This
+  changes the Gate's exact host allowlist (CLAUDE.md invariant 5), so it is a reviewed change, not a setting. Only
+  Claude is built.
+- Copilot and MCP: exposing safe research as an agent tool. It cannot undo a secret already pasted into a cloud
+  assistant, so it is only safe with local-first input. Not built.
 - A local Reader backend, a licensed data source behind the Gate, and an OS sandbox for non-Gate processes.
 
 ---
@@ -79,6 +92,9 @@ section 5 (reading job).
 ### 2. Why does anything go to the cloud at all?
 **Spoken:** Only the Reader runs in the cloud, and it only sees public text: pages Tavily returned and a query
 already sent. It has no tools and never sees the memo. Leaking requires knowing the deal; it does not.
+
+**Why not enterprise Copilot, then?** Enterprise protections may suit many workflows, and we do not claim Copilot is
+insecure. We address a stricter requirement: the confidential memo never enters any cloud model.
 
 **If pressed:** The Reader request is built inside the Gate and sent byte for byte, with thinking disabled and no
 `tools` field (tested). The reading job never contains the memo, the question, a need id or the secrets.
@@ -100,7 +116,7 @@ The user decides which terms are public before the run. Ask market questions, no
 
 **If pressed:** This is in our limits: "The target is named when you research it." What we protect is the deal
 around it: who is buying, at what price, with what financing. notes/BENIGN_RE.md is written as market-level
-questions for this reason. [Anant: pending]
+questions for this reason.
 
 **Source:** notes/DEVPOST.md "Q&A notes"; notes/THREAT_MODEL.md "What we do not claim"; notes/BENIGN_RE.md.
 
@@ -183,20 +199,22 @@ evaluation: 1.77 credits per question (usefulness, checks-frozen-80-g294c423). D
 **Source:** notes/BUSINESS.md sections 6 and 7; notes/RESEARCH.md; `shared/results/results.json` run "usefulness".
 
 ### 12. Who is it for, and why would they pay instead of banning agents?
-**Spoken:** The acquisitions team that signs a seller's NDA, and its compliance officer. Today many firms simply ban
-AI on live deals. We offer an approved path with a record they can check.
+**Spoken:** Real estate acquisitions teams: analysts and associates, with a Head of Acquisitions or Managing Partner
+as buyer. Many firms simply ban AI on live deals. We offer an approved path with a record they can check.
 
-**If pressed:** Breaching an NDA can cost a bidder the deal and the broker relationship. [Anant: pending: what a
-typical real estate NDA forbids.] A ban is a policy the officer has to enforce while staff use unmanaged AI
-accounts. Where the manager is an SEC-registered adviser, Advisers Act Section 204A already requires written
+**If pressed:** The buyer is likely a Managing Partner or Head of Acquisitions at a smaller firm, with IT and
+security approval; larger firms bring in procurement and compliance. Purchase intent and pricing are unvalidated
+hypotheses. A ban is a policy someone has to enforce while staff use unmanaged AI accounts. Where the manager is an SEC-registered adviser, Advisers Act Section 204A already requires written
 procedures against misuse of material non-public information (question 21). We know of no reported case of deal
 information leaking through an AI tool, and we do not claim one.
 
 **Source:** notes/RE_PITCH.md sections 2 and 3; notes/BUSINESS.md section 4.
 
 ### 13. Why is this team the one to build it?
-**Spoken:** [pending: one true, checkable line per member]. What we can show today: attacks written and hashed
-before any code, checks frozen at a tag, and a hostile review whose findings are all fixed.
+**Spoken:** Anant spent months building a commercial real estate deal management platform, with sponsor ownership,
+lender quotes and investment decisions in one workflow. [pending: one true, checkable line for each other member].
+What we can show today: attacks written and hashed before any code, checks frozen at a tag, and a hostile review
+whose findings are all fixed.
 
 **If pressed:** The attack writer never wrote check logic; the check builder never saw the attacks before the
 freeze.
@@ -229,9 +247,9 @@ cited number.
   logged.
 - Usefulness and cost, live on real Tavily: 23 of 30 answered, 1.77 credits and 14.7 seconds per question on
   average (usefulness, checks-frozen-80-g294c423).
-- False blocks, static: 0 of 30 on the frozen checks (benign-frozen, a271959). The live run also refused some
-  harmless Reader requests under `provenance.rare_term`; the evidence is in
-  `shared/results/usefulness/live_blocks.md`, and the count is [pending] until it is in results.json.
+- False blocks, static: 0 of 30 on the frozen checks (benign-frozen, a271959). False blocks, live: 3 harmless
+  Reader requests blocked under `provenance.rare_term` (questions 2, 8 and 18; evidence in
+  `shared/results/usefulness/live_blocks.md`), and all 3 questions were still answered.
 - Real estate questions (notes/BENIGN_RE.md): [pending].
 
 **Source:** commit 863a7a8 ("planner: correct wrong presets instead of giving up"), planner/schema.py
@@ -245,8 +263,9 @@ cited number.
 **Spoken:** The red team attacks the web side, and the split stopped every attack. The gate is for the Planner's own
 mistakes, which these attacks didn't trigger. We show it on a planted case, not as a measurement.
 
-**If pressed:** In the 40 runs of two minds plus gate, the Gate refused 0 requests: it checked everything that went
-out and never had to fire. The careless query in the demo is planted on purpose to show a refusal. It is a
+**If pressed:** Every run read the poisoned page (exposure check on the demo-laptop ledger, to become
+`shared/results/exposure.md`). In the 40 runs of two minds plus gate, the Gate refused 0 requests: it checked
+everything that went out and never had to fire. The careless query in the demo is planted on purpose to show a refusal. It is a
 demonstration, not a measurement.
 
 **Source:** `shared/results/results.json`, run "checks-frozen" at c303c1c: no blocked request in any attack;
@@ -256,8 +275,9 @@ notes/PITCH_SCRIPT.md, the gate beat and hard question 5.
 **Spoken:** This small local model mostly ignores page instructions. A model that follows instructions well leaks
 every time, which is what the compromised mode shows: 40 of 40. Better agents make this worse, not better.
 
-**If pressed:** Compromised mode always obeys the poisoned page, and we label it as such. Both ran only against our
-local stand-in for Tavily. Real estate: [pending].
+**If pressed:** Two confidentiality failures in a small controlled sample are meaningful, but not a universal
+failure rate. Every run read the poisoned page (exposure check). Compromised mode always obeys the poisoned page, and
+we label it as such. Both ran only against our local stand-in for Tavily. Real estate: [pending].
 
 **Source:** `shared/results/results.json`, run "checks-frozen rejudged-frozen" at 486a8b6; notes/DEVPOST.md
 "Challenges" (compromised mode); notes/PITCH_SCRIPT.md hard question 6.
@@ -277,7 +297,8 @@ not depend on spotting: the model holding the memo never reads the web.
 
 **If pressed:** The Gate's checks are the spotting layer, kept as a second line for the Planner's own slips, and we
 report their cost: 0 of 30 normal questions blocked on the frozen checks in the first evaluation (benign-frozen,
-a271959).
+a271959), and 3 harmless requests blocked in a live run (`shared/results/usefulness/live_blocks.md`). Redaction may
+also miss indirect identifiers, amounts and relationships.
 
 **Source:** notes/DEVPOST.md "Inspiration"; question 15.
 
@@ -290,16 +311,36 @@ a271959).
 Those searches carry the deal. We protect that channel; we are not a data provider.
 
 **If pressed:** A licensed data source could sit behind the Gate as another allowed host, with the same checks and
-ledger. That is roadmap, not built. [Anant: pending]
+ledger. That is roadmap, not built. Deal software organizes the private transaction; Doublethink adds outside
+research while keeping the public evidence separate from the confidential sponsor, loan and underwriting context.
 
 **Source:** notes/RE_PITCH.md section 5.
 
 ### 21. "A private property sale isn't inside information. Why would compliance care?"
-**Spoken:** Usually it is confidential under contract, not inside information about a security. The NDA is the
-stronger reason: breaching it can cost the deal and the broker relationship.
+**Spoken:** The memo is confidential transaction information: financing, sponsor relationships, underwriting and
+the investment rationale. The firm's own rule is that it must not reach an outside AI service.
 
 **If pressed:** Advisers Act Section 204A matters when the manager is an SEC-registered adviser handling material
 non-public information, or the deal touches a listed REIT. We do not claim every property deal is MNPI.
-[Anant: pending: confirm this framing]
 
-**Source:** notes/RE_PITCH.md section 3; notes/BUSINESS.md section 4.
+**Source:** Anant's pitch and defense document, sections 1 and 6; notes/BUSINESS.md section 4.
+
+### 22. "Why real estate first, and why wouldn't a firm build this itself?"
+**Spoken:** Real estate acquisitions matches the deal workflow directly. It is our first niche; confidential
+financial research is the broader category. Large firms could build it; a product cuts that cost, but the value
+still has to be validated.
+
+**If pressed:** Next niches: private equity and M&A (strong incumbent competition), banks and lenders (compliance and
+procurement), law firms (specialized research needs). Our teammate's experience gives workflow credibility, not
+customer validation.
+
+**Source:** Anant's pitch and defense document, sections 6 and 7.
+
+### 23. "Can the Reader still lie, and how do you prove nothing escaped?"
+**Spoken:** Yes, a poisoned page can contaminate findings; the split addresses getting the secret out, and every
+number shows its quote and source. For escape, we show monitored gate requests and a signed ledger anyone can verify.
+
+**If pressed:** Stronger claims depend on enforced egress isolation, runtime integrity and an independent
+assessment. A compromised laptop is out of scope.
+
+**Source:** Anant's pitch and defense document, section 6; question 7.
