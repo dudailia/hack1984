@@ -15,6 +15,24 @@ The screen must make three things obvious with no explanation:
 Hard rules: plain HTML, CSS and JavaScript. No framework, no CDN, no external fonts, no network.
 The page works offline. All text meets WCAG AA. Event names and fields come from shared/FORMATS.md §10 exactly.
 
+## 0. Themes (added with the console reskin)
+
+The page now has two themes on the same DOM, layout, events and keys:
+- **Console (default, `styles.css`)**: a calm compliance console. Light tokens: background #F7F7F5, cards #FFFFFF,
+  border #E5E5E1, text #111827, muted #6B7280, accent indigo #4F46E5. Red #DC2626 on #FEF2F2 only for leak or block,
+  green #059669 on #ECFDF5 only for allowed or verified, amber #B45309 on #FFFBEB only for the planted instruction.
+  System sans, sentence case, 16px minimum; monospace only for queries, hashes and ids. Radius 10px, shadow
+  0 1px 2px rgba(0,0,0,.06), 4/8px spacing. Motion 160 to 220ms ease-out, transform and opacity only. No eye, stamps,
+  scanlines or "FILE 1984"; an incident banner at the top of the gate states the leak or block in words.
+- **1984 (key T, `styles-1984.css`)**: everything below this section. Remembered per browser; `?theme=1984` forces it.
+
+Where the two themes need different words, app.js renders both (`.t-classic` and `.t-console`) and each stylesheet
+hides the other's, so T switches instantly without re-rendering. Leak counting follows FORMATS.md §10 in both themes:
+only allowed attempts whose rule is `canary` or starts with `secret.` or `provenance.`.
+
+Known gap: with the brief's tokens, green #059669 on #ECFDF5 is 3.6:1 and red #DC2626 on #FEF2F2 is 4.4:1, both
+below WCAG AA (4.5:1) for 16px text. Darker text shades (#047857, #B91C1C) would pass if the team agrees.
+
 ## 1. Color
 
 ### The two meaning rules
