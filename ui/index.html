@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Doublethink</title>
+<link rel="icon" href="data:,">
 <link rel="stylesheet" id="css-console" href="styles.css">
 <link rel="stylesheet" id="css-classic" href="styles-1984.css" disabled>
 </head>
@@ -160,6 +161,23 @@
   </section>
 </main>
 
+<!-- Outbound: every attempt to leave, from the ledger events, plus two computed lines (console theme only). -->
+<section id="outbound" class="outbound t-console" aria-labelledby="ob-title">
+  <div class="ob-table-wrap" id="ob-scroll">
+    <table class="ob-table">
+      <thead>
+        <tr><th scope="col">Time</th><th scope="col">Destination</th><th scope="col">Kind</th><th scope="col">Decision</th><th scope="col">Rule</th></tr>
+      </thead>
+      <tbody id="ob-rows"></tbody>
+    </table>
+  </div>
+  <div class="ob-lines">
+    <h2 id="ob-title">Outbound <span id="ob-run" class="ob-run"></span></h2>
+    <p id="ob-summary" class="ob-summary"></p>
+    <p id="ob-check" class="ob-check" role="status" aria-live="polite"></p>
+  </div>
+</section>
+
 <footer class="bottom">
   <button type="button" id="answer-bar" class="answer-bar" disabled title="Key A">
     <span class="label">Answer</span>
@@ -179,6 +197,7 @@
 <div id="fx" class="fx" aria-hidden="true"></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+<script src="outbound.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

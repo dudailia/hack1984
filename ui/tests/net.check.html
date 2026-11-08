@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Doublethink network check</title>
+<link rel="icon" href="data:,">
+</head>
+<body>
+<!-- Used by ui/check_network.py: plays the full replay of the real page in an iframe, then lists every resource the
+     page and this wrapper loaded (Resource Timing). The browser's own net log is the primary evidence. -->
+<pre id="result">RUNNING</pre>
+<iframe id="f" title="page under test" width="1280" height="720"></iframe>
+<script>
+'use strict';
+(async () => {
+  const q = new URLSearchParams(location.search);
+  const theme = q.get('theme') === '1984' ? '1984' : 'console';
+  const frame = document.getElementById('f');
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  await new Promise((r) => { frame.onload = r; frame.src = `../index.html?title=0&play=1&theme=${theme}`; });
+  let status = '';
+  let ended = false;
+  let resultsShown = false;
+  // The fixture lasts 175 s; wait in virtual time until the replay reports its end (■).
+  for (let i = 0; i < 36000; i += 1) {
+    const doc = frame.contentDocument;
+    status = (doc.getElementById('replay-status') || {}).textContent || '';
+    if (doc.getElementById('results') && doc.getElementById('results').classList.contains('open')) resultsShown = true;
+    if (status.includes('■')) { ended = true; break; }
+    await sleep(100);
+  }
+  const names = [
+    ...performance.getEntriesByType('navigation'), ...performance.getEntriesByType('resource'),
+    ...frame.contentWindow.performance.getEntriesByType('navigation'), ...frame.contentWindow.performance.getEntriesByType('resource'),
+  ].map((e) => e.name);
+  const hosts = {};
+  for (const n of names) {
+    let h;
+    try { h = new URL(n).hostname || new URL(n).protocol; } catch (_) { h = n; }
+    hosts[h] = (hosts[h] || 0) + 1;
+  }
+  document.getElementById('result').textContent = JSON.stringify({ theme, ended, resultsShown, status, hosts, urls: [...new Set(names)] });
+})();
+</script>
+</body>
+</html>

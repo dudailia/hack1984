@@ -32,6 +32,59 @@ The page has two themes on the same DOM, layout, events and keys:
 Where the two themes need different words, app.js renders both (`.t-classic` and `.t-console`) and each stylesheet
 hides the other's, so T switches instantly without re-rendering.
 
+## 0b. Outbound panel (console theme)
+
+A compact strip between the rooms and the footer. It answers, from the events alone, what left this device during the
+run on screen.
+
+- **Data:** only `ledger_row` attempt rows and `blocked` events (FORMATS §7, §10). No event schema change:
+
+  | Panel needs | Field |
+  |---|---|
+  | Time | `row.time` (HH:MM:SS) |
+  | Destination | `row.destination` |
+  | Kind | `row.kind` |
+  | Decision | `row.decision` (`allowed` shown as Sent) |
+  | Rule | `row.rule` |
+  | Detail | `blocked.detail` or `display.detail` |
+
+  Queries are never shown in the panel. Neither are the memo, the canary or any secret value.
+- **Logic:** `ui/outbound.js` holds pure functions with no DOM, loaded before app.js and tested on their own.
+  `summarize(rows)` returns one item per attempt, the sent attempts grouped by (kind, host), and the blocked attempts.
+  `summaryText()` and `check()` build the two lines. Every count, host, rule and detail comes from the rows.
+- **Table:** one row per outbound attempt.
+  - Columns: time, destination, kind, decision (Sent / Blocked), and rule (`—` when none).
+  - Kind labels follow the data's three kinds: `search` is "search", `extract` is "page read" and `reader` is
+    "reading job".
+  - A blocked row, or a sent row whose rule is a confirmed-secret or canary rule, is red. Other sent rows are green
+    (allowed).
+  - The table scrolls inside the strip, and the newest row is always in view.
+- **Summary line**, in this form: `Left this device: 2 search queries to api.tavily.com, 2 reading jobs to
+  api.anthropic.com. Blocked: 0.`
+  - **Loopback honesty rule:** a destination on 127.0.0.1, localhost or ::1 is the local Tavily stand-in. It plays
+    the web in the demo, but it never leaves the device, so it gets its own clause: `Sent to the local stand-in for the
+    web (stayed on this device): 2 search queries to 127.0.0.1:8702.` The single-agent leak therefore never reads as
+    "nothing left" next to a "yes" secret line.
+  - With no attempts: `Nothing has left this device yet.` With attempts but all blocked: `Nothing left this device.`
+- **Check line,** from the Gate's check results (the `rule` on each attempt), never from matching strings in the page.
+  - It answers whether a confirmed secret (`secret.*`) or the canary (`canary`) was in a **sent** request.
+  - Yes: `Confirmed secret or canary in a sent request: yes, in 1 of 2 sent requests. Row 03 to 127.0.0.1:8702:
+    matches a confirmed secret (codename) (secret.codename).` The detail and the rule are the Gate's own strings.
+  - No: `…: no, 0 of 4 sent requests matched.` or `…: no, nothing was sent.`
+  - Notes are added after the verdict in neutral text: `Blocked before sending: 1 (secret.buyer).` and the
+    provenance check (`provenance.*`, a rare memo term, which is not a confirmed secret).
+  - Only the verdict is coloured: red for yes, green for no.
+  - With the fixture: **yes** in the single agent (compromised) run, **no** in both Doublethink runs, and **no** with
+    one block in the careless run.
+- **Timing:** the panel updates on every attempt. For a leak or a block, it changes at the same moment as the
+  counters and the red row (`T.leakStamp` and `T.blockStamp`), so it never gives the moment away early. It follows
+  `S.view`, so during the proof beats it shows the verified run like the ledger, answer bar and counters.
+- **Layout at 1280x720:**
+  - The strip is 9.75rem tall, a full-width card in grid row 3; the footer moves to row 4 and the results screen
+    covers rows 2 to 4.
+  - Text is 16px, with monospace for times and hosts.
+  - The 1984 theme hides the strip (`.t-console`) and keeps its own layout.
+
 ## 1. Color
 
 ### The two meaning rules
@@ -519,8 +572,32 @@ All motion uses `--ease`. Durations at or under 250ms, except the sequences abov
 
 ## 9. Data sources, files and preview
 
-- Files are `ui/index.html`, `ui/styles.css` and `ui/app.js`, plus `ui/preview.py` and its tests in `ui/tests/`.
-  `ui/fonts/` is added only with approval.
+- Files are `ui/index.html`, `ui/styles.css`, `ui/styles-1984.css`, `ui/outbound.js` and `ui/app.js`, plus
+  `ui/preview.py`, `ui/check_network.py` and the tests in `ui/tests/`. `ui/fonts/` is added only with approval.
+- **Nothing external.** The page loads only its own files from its origin:
+  - no web fonts (system font stacks only), no CDN scripts, no icon sets and no analytics;
+  - the favicon is an inline `data:` URI, so the browser does not request `/favicon.ico`.
+
+  Proven three ways:
+  1. `ui/tests/test_static.py` scans the page files for external URLs and `@import`. The SVG namespace string is the
+     only allowed `http` text.
+  2. `python ui/check_network.py` plays the **full replay** in both themes in headless Edge, served by preview.py. It
+     records the browser's net log and the page's Resource Timing, and writes `ui/evidence/network-replay.md`.
+     - The check fails if the page requests, loads or connects to anything but 127.0.0.1.
+     - During the run, every non-loopback host is mapped to NOTFOUND, so nothing can leave even if something tried.
+     - Edge's own background attempts (autofill, network time) are listed openly, separately from the page, with
+       their outcome.
+  3. `ui/tests/test_network.py` runs the same check into a temp file on every test run.
+- **Tests** (`python -m unittest discover -s ui/tests -t .`, standard library only):
+  - `test_preview` and `test_static`.
+  - `test_ui_browser`: headless Edge or Chrome runs `ui/tests/ui.test.html`, which covers:
+    - the Outbound logic and the panel in the page;
+    - the four fixes on main: the canary is never in the DOM at any of the fixture's event times, in both themes; a
+      run's memo never appears before its `parties_confirmed`; tampered rows show only the failure; reader job counts
+      come from `docs_read` and typed facts appear once.
+  - `test_network`.
+
+  The browser tests skip with a reason when no browser is found (`DT_BROWSER` overrides the path).
 - Replay reads `shared/fixtures/demo_events.jsonl` (one FORMATS §10 envelope per line) and waits on `t_ms`.
 - Live reads `GET /events?token=…` (SSE, no `event:` line). Replay and live share one dispatcher keyed on `type`.
 - Paths are relative to the one origin: the page is at `/ui/index.html` and the fixtures are read from

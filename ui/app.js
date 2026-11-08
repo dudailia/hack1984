@@ -350,9 +350,42 @@
     } else t.textContent = '—';
   }
 
-  // Everything that describes one run follows the ledger: answer bar, counters, badge, gate header.
+  // ---------- Outbound panel (console theme): logic in outbound.js, numbers from the ledger events only ----------
+  function renderOutbound(sid) {
+    if (sid !== S.view) return;
+    const s = sid ? S.sessions[sid] : null;
+    const O = window.Outbound;
+    if (!O) return;
+    const sum = O.summarize(s ? s.rows : []);
+    const rows = sum.attempts.map((a) => {
+      const leak = a.decision === 'sent' && O.isSecretRule(a.rule);
+      const cls = `ob-row ${a.decision}${leak ? ' leak' : ''}`;
+      return el('tr', { class: cls },
+        el('td', { class: 'mono' }, a.time),
+        el('td', { class: 'mono ob-host', title: a.host }, a.host),
+        el('td', null, O.kindLabel(a.kind)),
+        el('td', null, el('span', { class: `ob-decision ${a.decision}${leak ? ' leak' : ''}` }, a.decision === 'blocked' ? 'Blocked' : 'Sent')),
+        el('td', null, a.rule
+          ? el('span', { class: `ob-rule mono${a.decision === 'blocked' || leak ? ' bad' : ''}`, title: a.detail || a.rule }, a.rule)
+          : el('span', { class: 'ob-none' }, '—')));
+    });
+    fill($('#ob-rows'), rows.length ? rows : el('tr', { class: 'ob-empty' }, el('td', { colspan: '5' }, 'No outbound attempts yet.')));
+    fill($('#ob-run'), sid ? el('span', { class: 'mono' }, sid) : []);
+    $('#ob-summary').textContent = O.summaryText(sum);
+    const c = O.check(sum);
+    const line = $('#ob-check');
+    // Only the verdict carries red (yes) or green (no); notes such as a block stay neutral.
+    fill(line, [el('span', { class: 'ob-verdict' }, c.verdictText),
+      c.notes.length ? el('span', { class: 'ob-notes' }, ` ${c.notes.join(' ')}`) : null]);
+    line.className = `ob-check ${c.verdict}`;
+    const sc = $('#ob-scroll');
+    sc.scrollTop = sc.scrollHeight;   // the newest attempt is always in view
+  }
+
+  // Everything that describes one run follows the ledger: answer bar, counters, badge, gate header, Outbound.
   function showRunSummary(sid, animate = false) {
     renderAnswerBar(sid);
+    renderOutbound(sid);
     renderCounters(sid, animate);
     renderBadge();
     renderGateHead();
@@ -949,17 +982,21 @@
 
       // The moment: packet, red wall flash, stamp, counter tick, eye. None of it delays the replay.
       if (animate && kind !== 'result') launchPacket(li, row, kind);
+      // The Outbound panel changes with the counters, so a leak or a block never shows there before its moment.
       if (kind === 'blocked') {
         if (animate) {
           later(flashExit, 0);
-          later(() => renderCounters(sid, true), T.blockStamp);
+          later(() => { renderCounters(sid, true); renderOutbound(sid); }, T.blockStamp);
           later(() => renderIncident(sid, true), T.blockRed);
-        } else { renderCounters(sid, false); renderIncident(sid, false); }
+        } else { renderCounters(sid, false); renderIncident(sid, false); renderOutbound(sid); }
       } else if (kind === 'leak') {
         if (animate) {
-          later(() => { renderCounters(sid, true); setEye(true, true); renderIncident(sid, true); }, T.leakStamp);
-        } else { renderCounters(sid, false); setEye(true, true); renderIncident(sid, false); }
-      } else renderCounters(sid, animate);
+          later(() => { renderCounters(sid, true); setEye(true, true); renderIncident(sid, true); renderOutbound(sid); }, T.leakStamp);
+        } else { renderCounters(sid, false); setEye(true, true); renderIncident(sid, false); renderOutbound(sid); }
+      } else {
+        renderCounters(sid, animate);
+        renderOutbound(sid);
+      }
     },
 
     blocked(env, o) {
@@ -979,7 +1016,7 @@
       }
       if (env.data.planted && !li.querySelector('.tag')) li.insertBefore(plantedTag(), li.querySelector('.slip-foot'));
       renderIncident(sid, false);
-      if (o && o.instant) scrollLedger();
+      if (o && o.instant) { scrollLedger(); renderOutbound(sid); }   // animated: the block moment redraws it
     },
 
     docs_read(env, o) {
