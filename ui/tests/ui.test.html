@@ -346,59 +346,73 @@
       const v = R.select(variant);
       ok('leak_judge FALLBACK and a missing detector both exclude a run', v.modes.every((m) => m.index === null) && v.excluded.length === 3, JSON.stringify(v.modes.map((m) => m.index)));
     }
-    // ---------- results screen: real-estate headline, corporate memo as "First evaluation" ----------
+    // ---------- results screen: false blocks, usefulness and cost from the runs that carry them ----------
+    {
+      const R = window.Results;
+      const three = await (await fetch('fixtures/results_three_runs.json', { cache: 'no-store' })).json();
+      // Shaped like the real file: the benign-frozen and usefulness runs carry figures but no detector field.
+      const five = JSON.parse(JSON.stringify(three));
+      five.runs.push(
+        { label: 'benign-frozen', commit: 'a271959', planner_model: null, source: null, command: 'python3 -m checks.benign_run notes/BENIGN.md',
+          false_blocks: { blocked: 0, total: 30, by_rule: {} } },
+        { label: 'usefulness', commit: 'checks-frozen-80-g294c423', planner_model: 'qwen3:8b', source: 'real',
+          usefulness: { answered_with_cited_number: 23, total: 30 }, cost: { tavily_credits_per_question: 1.77, seconds_per_question: 14.7 } });
+      const sel = R.select(five);
+      const from = Object.fromEntries(sel.modes.map((m) => [m.key, m.index]));
+      ok('five runs: leak bars keep the frozen-detector rule', JSON.stringify(from) === JSON.stringify({ single_agent: 1, compromised: 1, two_minds: 2, doublethink: 2 }), JSON.stringify(from));
+      ok('five runs: false blocks from benign-frozen', sel.falseBlocks && sel.falseBlocks.index === 3 && sel.falseBlocks.value.blocked === 0 && sel.falseBlocks.value.total === 30, JSON.stringify(sel.falseBlocks));
+      ok('five runs: usefulness and cost from the usefulness run', sel.usefulness && sel.usefulness.index === 4 && sel.creditsPerQuestion.index === 4
+        && sel.secondsPerQuestion.index === 4 && sel.creditsPerQuestion.value === 1.77 && sel.secondsPerQuestion.value === 14.7, JSON.stringify([sel.usefulness, sel.creditsPerQuestion, sel.secondsPerQuestion]));
+      ok('five runs: only the fallback run is not shown', sel.excluded.map((x) => x.index).join() === '0', JSON.stringify(sel.excluded));
+      const box = document.createElement('section');
+      R.render(box, five, { example: false, source: '/shared/results/results.json' });
+      const fb = box.querySelector('.fb');
+      ok('five runs: "False blocks: 0 / 30" with its run', !!fb && has(fb.textContent, '0 / 30') && has(fb.textContent, 'run 4 of 5') && has(fb.textContent, '“benign-frozen”')
+        && !has(box.textContent, 'False blocks on normal questions: not measured'), fb ? fb.textContent : box.textContent.slice(0, 200));
+      ok('five runs: usefulness and cost name the usefulness run', has(box.textContent, '23 / 30') && has(box.textContent, '1.77') && has(box.textContent, '14.7')
+        && (box.textContent.match(/run 5 of 5, “usefulness”/g) || []).length === 3, box.textContent.slice(-400));
+      ok('five runs: the 40-attack block is labelled first evaluation, corporate deal memo', box.querySelector('.eval-label').textContent === 'First evaluation, corporate deal memo'
+        && !!(box.querySelector('.eval-label').compareDocumentPosition(box.querySelector('.bars')) & Node.DOCUMENT_POSITION_FOLLOWING), box.textContent.slice(0, 120));
+      ok('five runs: no fallback number', ['1 / 40', '39 / 40', '13 / 30', '17 / 30', '5.32', '9.75'].every((n) => !box.textContent.includes(n)), 'fallback number shown');
+    }
+    // The page itself, with the results.json on this checkout: every figure the data carries is shown.
+    {
+      const real = await fetch('/shared/results/results.json', { cache: 'no-store' });
+      if (real.ok) {
+        const data = await real.json();
+        const sel = window.Results.select(data);
+        const doc = await load(`at=${RESULTS_AT}&theme=console`);
+        const box = doc.getElementById('results');
+        const fbText = (box.querySelector('.fb') || box).textContent;
+        okResults('results screen: false blocks read from the data', sel.falseBlocks
+          ? has(fbText, `${sel.falseBlocks.value.blocked} / ${sel.falseBlocks.value.total}`) && !has(box.textContent, 'False blocks on normal questions: not measured')
+          : has(box.textContent, 'not measured'), fbText);
+        okResults('results screen: labelled first evaluation, corporate deal memo', has(box.textContent, 'First evaluation, corporate deal memo'), box.textContent.slice(0, 120));
+      }
+    }
+    // ---------- results screen: the real estate scenario is a demo, never next to 40-attack numbers ----------
     {
       const R = window.Results;
       const two = await (await fetch('fixtures/results_two_scenarios.json', { cache: 'no-store' })).json();
       ok('scenarioOf: scenario field', R.scenarioOf({ scenario: 'real_estate' }) === 'real_estate' && R.scenarioOf({ scenario: 'Real-Estate' }) === 'real_estate', 'field not read');
       ok('scenarioOf: label', R.scenarioOf({ label: 're-frozen' }) === 'real_estate' && R.scenarioOf({ label: 'batch real estate 2' }) === 'real_estate'
         && R.scenarioOf({ label: 'checks-frozen rejudged-frozen' }) === 'corporate' && R.scenarioOf({ label: 'benign-frozen' }) === 'corporate', 'label rule');
-      const both = R.selectScenarios(two);
-      const idx = (sel) => Object.fromEntries(sel.modes.map((m) => [m.key, m.index]));
-      ok('two scenarios: headline is the frozen real-estate run', both.headline.scenario === 'real_estate'
-        && Object.values(idx(both.headline)).every((i) => i === 4), JSON.stringify(idx(both.headline)));
-      ok('two scenarios: first evaluation from the corporate runs', !!both.first && JSON.stringify(idx(both.first))
-        === JSON.stringify({ single_agent: 2, compromised: 2, two_minds: 3, doublethink: 3 }), JSON.stringify(both.first && idx(both.first)));
-      ok('two scenarios: each block excludes its own fallback run', both.headline.excluded.map((x) => x.index).join() === '1'
-        && both.first.excluded.map((x) => x.index).join() === '0', JSON.stringify([both.headline.excluded, both.first.excluded]));
-
+      const sel = R.select(two);
+      const idx = Object.fromEntries(sel.modes.map((m) => [m.key, m.index]));
+      ok('real estate runs never feed the bars', JSON.stringify(idx) === JSON.stringify({ single_agent: 2, compromised: 2, two_minds: 3, doublethink: 3 }), JSON.stringify(idx));
+      ok('real estate runs never feed false blocks, usefulness or cost', [sel.falseBlocks, sel.usefulness, sel.creditsPerQuestion, sel.secondsPerQuestion].every((h) => !h || (h.index !== 1 && h.index !== 4)), 'a real estate figure');
+      ok('real estate runs listed as a demo, not a measurement', sel.excluded.filter((x) => /real estate scenario: a demo/.test(x.reason)).map((x) => x.index).join() === '1,4', JSON.stringify(sel.excluded));
       const box = document.createElement('section');
-      R.render(box, two, { example: false, source: '/shared/results/results.json' });
-      const vals = (root) => Object.fromEntries([...root.querySelectorAll('.bv')].map((n) => [n.dataset.mode, n.textContent.trim()]));
-      const head = box.querySelector('.headline-eval');
-      const first = box.querySelector('.first-eval');
-      ok('two scenarios: headline bars', !!head && JSON.stringify(vals(head)) === JSON.stringify({ single_agent: '4 / 40', compromised: '38 / 40', two_minds: '0 / 40', doublethink: '0 / 40' }), JSON.stringify(head && vals(head)));
-      ok('two scenarios: "First evaluation" below the headline', !!first && has(first.textContent, 'First evaluation')
-        && !!(head.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING), first ? first.textContent.slice(0, 80) : 'missing');
-      ok('two scenarios: first evaluation bars', !!first && JSON.stringify(vals(first)) === JSON.stringify({ single_agent: '2 / 40', compromised: '40 / 40', two_minds: '0 / 40', doublethink: '0 / 40' }), JSON.stringify(first && vals(first)));
-      const text = box.textContent;
-      const fallbackNumbers = ['1 / 40', '39 / 40', '13 / 30', '17 / 30', '5.32', '9.75', '7 / 40', '37 / 40', '5 / 40', '3 / 40', '11 / 30', '19 / 30', '8.25', '6.41'].filter((n) => text.includes(n));
-      ok('two scenarios: no fallback number appears', fallbackNumbers.length === 0, fallbackNumbers.join(', '));
-      ok('two scenarios: false blocks from the real-estate run', has(box.querySelector('.fb').textContent, '1 / 30') && has(box.querySelector('.fb').textContent, 'run 5 of 5'), box.querySelector('.fb').textContent);
-      ok('two scenarios: sources name runs by label and file place', has(head.textContent, 'run 5 of 5') && has(head.textContent, '“re-checks-frozen”')
-        && has(first.textContent, 'run 3 of 5') && has(first.textContent, 'run 4 of 5'), head.textContent.slice(-200));
-
-      // The label alone also marks a real-estate run; without one, the screen is the corporate screen as before.
-      const byLabel = JSON.parse(JSON.stringify(two));
-      byLabel.runs.forEach((r) => { delete r.scenario; });
-      ok('two scenarios: label alone is enough', R.selectScenarios(byLabel).headline.scenario === 'real_estate', 'not found by label');
-      const three = await (await fetch('fixtures/results_three_runs.json', { cache: 'no-store' })).json();
-      const plain = R.selectScenarios(three);
-      const b3 = document.createElement('section');
-      R.render(b3, three, { example: false, source: 'x' });
-      ok('no real-estate run: corporate screen as before, no first-evaluation block', plain.first === null && plain.headline.scenario === null
-        && !b3.querySelector('.first-eval') && !has(b3.textContent, 'Real estate'), b3.textContent.slice(0, 120));
-      // A real-estate run judged only by the fallback never becomes the headline.
-      const onlyFallbackRe = JSON.parse(JSON.stringify(two));
-      onlyFallbackRe.runs.splice(4, 1);
-      ok('fallback-only real-estate runs: no real-estate headline', R.selectScenarios(onlyFallbackRe).headline.scenario === null, 'became headline');
-      // ?example=1 rules still apply to both blocks.
+      R.render(box, two, { example: false, source: 'x' });
+      const reNumbers = ['4 / 40', '38 / 40', '7 / 40', '37 / 40', '5 / 40', '3 / 40', '1 / 30', '11 / 30', '19 / 30', '8.25', '6.41'].filter((n) => box.textContent.includes(n));
+      ok('no real estate number on the screen', reNumbers.length === 0, reNumbers.join(', '));
+      ok('no "Real estate scenario" headline or second block', !box.querySelector('.first-eval, .scenario-name') && box.querySelectorAll('.bars').length === 1, box.innerHTML.slice(0, 200));
       const bx = document.createElement('section');
       const ex = JSON.parse(JSON.stringify(two));
       ex.runs.forEach((r) => { delete r.detector; });
       R.render(bx, ex, { example: true, source: 'x' });
       const nums = [...bx.querySelectorAll('[data-num]')];
-      ok('two scenarios with ?example=1: every number labelled', nums.length > 8 && nums.every((n) => n.querySelector('.example-tag')), `${nums.length}`);
+      ok('?example=1: every number labelled', nums.length >= 5 && nums.every((n) => n.querySelector('.example-tag')), `${nums.length}`);
     }
     // ---------- results screen: never example data unless ?example=1 (Ilia's must-fix) ----------
     {
