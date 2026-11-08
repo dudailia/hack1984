@@ -17,8 +17,8 @@ import hashlib
 import os
 import secrets
 import string
-import subprocess
 
+from baseline import gitread
 from gate import checks_bridge, checks_stub
 from gate.canonical import canonical_json
 from gate.tavily import search_body
@@ -56,13 +56,9 @@ def _checks_sha256():
 
 
 def _matches_frozen():
-    """True if checks/ (tests excluded) is unchanged since the checks-frozen tag, False if changed, None if unknown."""
-    try:
-        r = subprocess.run(["git", "-C", REPO, "diff", "--quiet", "refs/tags/" + FROZEN_TAG, "--", "checks",
-                            ":(exclude)checks/tests"], capture_output=True, timeout=20)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return {0: True, 1: False}.get(r.returncode)
+    """True if checks/ (tests excluded) is unchanged since the checks-frozen tag, False if changed, None if unknown.
+    Read from .git directly (gitread); an untracked .py file in checks/ also counts as changed."""
+    return gitread.matches_tag(REPO, FROZEN_TAG, "checks", exclude=("tests",))
 
 
 class Detector:

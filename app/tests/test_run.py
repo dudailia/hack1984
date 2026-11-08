@@ -186,25 +186,41 @@ class VerifyTest(AppCase):
 
     def test_verifier_missing_is_503(self):
         self.finished_session(SID)
-        self.app.verify_cmd = None  # default: <root>/proof/verify.py, which does not exist in the temp root
+        self.app.verifier = None  # proof.verify absent
         status, body = self.api("/api/verify", {"session_id": SID})
         self.assertEqual((status, body["error"]), (503, "proof_unavailable"))
         self.assertNotIn("proof_result", [e["type"] for e in self.app.hub.events(SID)])
+        self.assertEqual(self.gate.requests, [], "503 before fetching")
 
     def test_verifier_garbage_is_502(self):
         self.finished_session(SID)
-        self.app.verify_cmd = [sys.executable, "-c", "print('VALID')"]
-        status, body = self.api("/api/verify", {"session_id": SID})
-        self.assertEqual((status, body["error"]), (502, "verifier_error"))
+        for bad in (lambda data: "VALID", lambda data: {"rows_checked": 4}, lambda data: 1 / 0):
+            with self.subTest(bad=bad):
+                self.app.verifier = bad
+                status, body = self.api("/api/verify", {"session_id": SID})
+                self.assertEqual((status, body["error"]), (502, "verifier_error"))
         self.assertNotIn("proof_result", [e["type"] for e in self.app.hub.events(SID)])
 
-    def test_valid_json_but_nonzero_exit_is_not_valid(self):
+    def test_only_valid_true_is_valid(self):
         self.finished_session(SID)
-        out = json.dumps({"valid": True, "rows_checked": 4, "broken_at_seq": None, "reason": None})
-        self.app.verify_cmd = [sys.executable, "-c", "import sys; print(%r); sys.exit(1)" % out]
-        status, body = self.api("/api/verify", {"session_id": SID})
-        self.assertEqual(status, 200)
-        self.assertIs(body["valid"], False)
+        for valid in ("true", 1, None):
+            with self.subTest(valid=valid):
+                self.app.verifier = lambda data, v=valid: {"valid": v, "rows_checked": 4, "broken_at_seq": None,
+                                                           "reason": None}
+                status, body = self.api("/api/verify", {"session_id": SID})
+                self.assertEqual(status, 200)
+                self.assertIs(body["valid"], False)
+
+    def test_verifier_gets_the_saved_bundle_bytes_in_process(self):
+        self.finished_session(SID)
+        seen = []
+        real = self.app.verifier
+        self.app.verifier = lambda data: seen.append(data) or real(data)
+        with mock.patch("subprocess.Popen", side_effect=AssertionError("no program may start")), \
+                mock.patch("os.posix_spawn", side_effect=AssertionError("no program may start")):
+            status, body = self.api("/api/verify", {"session_id": SID})
+        self.assertEqual((status, body["valid"]), (200, True))
+        self.assertEqual(seen, [self.gate.bundles[SID]])
 
 
 class VerifyNoSignerTest(AppCase):
@@ -432,6 +448,52 @@ class LoaderTest(unittest.TestCase):
         if os.path.exists(os.path.join(run.REPO, "proof", "tamper.py")):
             self.skipTest("proof/tamper.py exists")
         self.assertIsNone(run.load_tamper_helper())
+
+    def test_verifier_is_proof_verify_bytes(self):
+        from proof import verify
+        self.assertIs(run.load_verifier(), verify.verify_bytes)
+        self.assertIs(run.App(gate_port=1)._verifier(), verify.verify_bytes, "the default looks it up")
+
+    def test_verifier_absent_is_none(self):
+        real = run.importlib.util.find_spec
+        with mock.patch.object(run.importlib.util, "find_spec",
+                               side_effect=lambda name, *a: None if name == "proof.verify" else real(name, *a)):
+            self.assertIsNone(run.load_verifier())
+
+
+class VerifyRealProofTest(AppCase):
+    """The real verifier and tamper helper (proof/, Anant) on a real signed bundle, in this process."""
+
+    def setUp(self):
+        super().setUp()
+        try:
+            from proof.tests.helpers import SESSION, sample_bundle
+        except unittest.SkipTest as e:  # cryptography not installed
+            self.skipTest(str(e))
+        self.sid = SESSION
+        self.app.verifier = run.load_verifier()
+        self.app.tamper_helper = run.load_tamper_helper()
+        self.finished_session(self.sid, bundle=False)
+        self.gate.bundles[self.sid] = sample_bundle()
+
+    def test_verify_then_tamper_without_starting_a_program(self):
+        with mock.patch("subprocess.Popen", side_effect=AssertionError("no program may start")), \
+                mock.patch("os.posix_spawn", side_effect=AssertionError("no program may start")):
+            status, body = self.api("/api/verify", {"session_id": self.sid})
+            self.assertEqual(status, 200, body)
+            self.assertIs(body["valid"], True)
+            self.assertEqual(body["rows_checked"], len(json.loads(self.gate.bundles[self.sid])["rows"]))
+            self.assertEqual(len(body["signer_key_sha256"]), 64)
+            status, body = self.api("/api/tamper", {"session_id": self.sid, "seq": 2})
+            self.assertEqual(status, 200, body)
+            self.assertEqual((body["valid"], body["tampered"], body["tampered_seq"]), (False, True, 2))
+            self.assertEqual(body["broken_at_seq"], 2)
+            # the fallback flip, verified by the real verifier in process
+            self.app.tamper_helper = None
+            status, body = self.api("/api/tamper", {"session_id": self.sid, "seq": 1})
+            self.assertEqual((status, body["valid"], body["broken_at_seq"]), (200, False, 1))
+        self.assertEqual([e["data"]["valid"] for e in self.app.hub.events(self.sid) if e["type"] == "proof_result"],
+                         [True, False, False])
 
 
 class FlipTest(unittest.TestCase):

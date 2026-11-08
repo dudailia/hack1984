@@ -16,7 +16,8 @@ import string
 import sys
 import unicodedata
 
-from baseline import config, gate_client, netguard, ollama
+from baseline import config, gate_client, ollama
+from shared import guard
 
 REPO = config.REPO
 DEMO_SESSION = os.path.join(REPO, "shared", "fixtures", "halyard_session.json")
@@ -168,7 +169,7 @@ def run(spec, mode="single_agent", gate=None, llm=None, max_searches=DEFAULT_MAX
 
 
 def main(argv=None):
-    netguard.install()  # loopback only from here on (invariant 1); swap for shared.guard when it lands
+    guard.install_loopback_guard("baseline")  # loopback only from here on: Gate and Ollama ports (invariant 1)
     ap = argparse.ArgumentParser(prog="python3 -m baseline.agent", description="Single-agent baseline (fake only)")
     ap.add_argument("--mode", choices=gate_client.BASELINE_MODES, default="single_agent")
     ap.add_argument("--max-searches", type=int, default=DEFAULT_MAX_SEARCHES)

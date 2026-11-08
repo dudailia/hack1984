@@ -24,14 +24,14 @@ import json
 import os
 import re
 import shlex
-import subprocess
 import sys
 import tempfile
 import threading
 import time
 
-from baseline import agent, compromised, config, gate_client, judge, ollama
+from baseline import agent, compromised, config, gate_client, gitread, judge, ollama
 from fake_tavily import inject
+from shared import guard
 
 REPO = config.REPO
 MODES = ["single_agent", "compromised", "two_minds", "doublethink"]
@@ -105,12 +105,8 @@ def registered_hash(path=HASH_NOTE):
 
 
 def checks_frozen():
-    try:
-        r = subprocess.run(["git", "-C", REPO, "rev-parse", "-q", "--verify", "refs/tags/" + FROZEN_TAG],
-                           capture_output=True, timeout=10)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return r.returncode == 0
+    """Does the checks-frozen tag exist? Read from .git (loose or packed-refs); no git process is started."""
+    return gitread.tag_exists(REPO, FROZEN_TAG)
 
 
 def _is_attack_name(path):
@@ -296,12 +292,8 @@ def _now():
 
 
 def _commit():
-    try:
-        r = subprocess.run(["git", "-C", REPO, "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
-                           timeout=10)
-        return r.stdout.strip() or "unknown"
-    except (OSError, subprocess.SubprocessError):
-        return "unknown"
+    """Short HEAD commit, read from .git (HEAD, loose refs, packed-refs, worktrees); no git process is started."""
+    return gitread.short_head(REPO) or "unknown"
 
 
 def _load_results(out, digest, total):
@@ -424,7 +416,9 @@ def run_redteam(attacks, modes, out, review=None, label="redteam", gate=None, ll
 
 
 def main(argv=None):
-    # TODO(guard): install shared.guard (loopback-only audit hook, invariant 1) once it lands in shared/.
+    # Loopback only from here on (invariant 1): Gate and Ollama ports only, no programs. The red team needs no
+    # program: HEAD and the checks-frozen tag are read from .git directly (gitread).
+    guard.install_loopback_guard("baseline")
     argv = sys.argv[1:] if argv is None else argv
     a = parse_args(argv)
     try:

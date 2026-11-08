@@ -1,13 +1,13 @@
-"""Stand-in for proof/verify.py in app tests (proof/ is Anant's and not merged): same CLI and --json shape.
+"""Stand-in for proof.verify.verify_bytes in app tests: same result shape, checks only the hash chain.
 
-    python3 fake_verify.py [--no-signer] BUNDLE.json --json
+    verifier(signer=True) -> fn(bundle_bytes) -> {"valid", "rows_checked", "broken_at_seq", "reason", "bundle_head",
+                                                  "signer_key_sha256"}
 
-Checks only that each row's hash is sha256 of the canonical row without `hash`, and head = last hash.
-Exit 0 if valid, 1 if not. Not a real verifier.
+Checks only that each row's hash is sha256 of the canonical row without `hash`, and head = last hash. Not a real
+verifier; the real one (proof.verify) is used in VerifyRealProofTest.
 """
 import hashlib
 import json
-import sys
 
 SIGNER = "ab" * 32
 
@@ -16,9 +16,7 @@ def canonical(obj):
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
-def check(path):
-    with open(path, "rb") as f:
-        data = f.read()
+def check(data):
     try:
         b = json.loads(data)
     except ValueError:
@@ -36,16 +34,10 @@ def check(path):
     return {"valid": True, "rows_checked": checked, "broken_at_seq": None, "reason": None, "bundle_head": b["head"]}
 
 
-def main(argv):
-    signer = "--no-signer" not in argv
-    path = [a for a in argv if not a.startswith("--")][0]
-    r = check(path)
-    if signer:
-        r["signer_key_sha256"] = SIGNER
-    if "--json" in argv:
-        print(json.dumps(r, sort_keys=True))
-    return 0 if r["valid"] else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+def verifier(signer=True):
+    def verify_bytes(data):
+        r = check(data)
+        if signer:
+            r["signer_key_sha256"] = SIGNER
+        return r
+    return verify_bytes

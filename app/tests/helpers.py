@@ -13,9 +13,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 from app import _loop_stub, events, run
+from app.tests import fake_verify
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FAKE_VERIFY = os.path.join(HERE, "fake_verify.py")
 FAKE_CHILD = os.path.join(HERE, "fake_child.py")
 SECRET = "TAVILY_API_KEY=tvly-must-never-be-served"
 
@@ -120,9 +120,8 @@ class AppCase(unittest.TestCase):
         self.gate = StubGate()
         self.addCleanup(self.gate.stop)
         self.loop = self.start_run or FakeLoop()
-        verify_cmd = [sys.executable, FAKE_VERIFY] + ([] if self.signer else ["--no-signer"])
         self.app = run.App(root=self.root, gate_port=self.gate.port, token="tok-123", bundles_dir=self.bundles_dir,
-                           verify_cmd=verify_cmd, start_run=self.loop, ping_interval=0.2,
+                           verifier=fake_verify.verifier(self.signer), start_run=self.loop, ping_interval=0.2,
                            tamper_helper=None)
         self.srv = run.make_server(self.app, port=0)
         self.port = self.srv.server_address[1]
@@ -209,5 +208,5 @@ class AppCase(unittest.TestCase):
         return sid
 
 
-__all__ = ["AppCase", "FakeLoop", "StubGate", "make_bundle", "make_root", "canonical", "SECRET", "FAKE_VERIFY",
+__all__ = ["AppCase", "FakeLoop", "StubGate", "make_bundle", "make_root", "canonical", "SECRET",
            "FAKE_CHILD", "events", "_loop_stub", "shutil"]

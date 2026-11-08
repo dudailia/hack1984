@@ -32,6 +32,19 @@ def dummy_payloads():
         return redteam.parse_payloads(f.read())
 
 
+# redteam.main installs the loopback guard, and an audit hook cannot be removed: in this test process it is
+# replaced by a mock. That main really installs it is tested in a child process (test_review1.R1LoopbackGuard).
+_GUARD = mock.patch.object(redteam.guard, "install_loopback_guard")
+
+
+def setUpModule():
+    _GUARD.start()
+
+
+def tearDownModule():
+    _GUARD.stop()
+
+
 class ArgsTest(unittest.TestCase):
     def test_args(self):
         a = redteam.parse_args(["--attacks", "p.md", "--modes", "all", "--out", "out/r.json"])
