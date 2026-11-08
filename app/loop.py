@@ -20,9 +20,10 @@ import threading
 import time
 
 import reader
+from app import scenario as scenarios
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FIXTURE = os.path.join(REPO, "shared", "fixtures", "halyard_session.json")
+FIXTURE = scenarios.SCENARIOS[scenarios.DEFAULT]["fixture"]  # Halyard, the default scenario
 ENV_PATH = os.path.join(REPO, ".env")
 LOOPBACK = "127.0.0.1"
 DEFAULT_GATE_PORT = 8701
@@ -32,10 +33,11 @@ MODES = ("single_agent", "compromised", "two_minds", "doublethink")
 SOURCES = ("real", "fake")
 BASELINE_MODES = ("single_agent", "compromised")
 
+# Halyard's (the default scenario); careless_action(scenario) gives each scenario's own query
 CARELESS_ACTION = {"action": "search", "need": "careless_check", "claim_types": ["revenue_growth"],
-                   "query": "Ossory Capital Partners offer for Brackwater Payments", "preset": "general"}
+                   "query": scenarios.SCENARIOS["halyard"]["careless_query"], "preset": "general"}
 MAX_REPEATS = 2  # the run stops as done at the second repeated Planner action
-NEED_LABELS = {"sector_growth": "Sector growth", "peer_ev_revenue": "Listed payments companies"}
+NEED_LABELS = scenarios.SCENARIOS["halyard"]["need_labels"]
 
 _ALNUM = string.ascii_lowercase + string.digits
 _lock = threading.Lock()
@@ -196,11 +198,21 @@ def _default_baseline_runs():
 
 # ---------------------------------------------------------------- helpers
 
-def need_label(need):
-    return NEED_LABELS.get(need) or need.replace("_", " ").strip().capitalize()
+def need_label(need, labels=NEED_LABELS):
+    return labels.get(need) or need.replace("_", " ").strip().capitalize()
 
 
-def load_spec(question=None, fixture=FIXTURE):
+def careless_action(scenario=scenarios.DEFAULT):
+    """The demo's planted careless search for this scenario: it names that memo's own buyer and target."""
+    return dict(CARELESS_ACTION, query=scenarios.SCENARIOS[scenario]["careless_query"])
+
+
+def _fixture_question(fixture):
+    with open(fixture, encoding="utf-8") as f:
+        return json.load(f)["question"]
+
+
+def load_spec(question=None, fixture=FIXTURE, scenario=scenarios.DEFAULT):
     with open(fixture, encoding="utf-8") as f:
         fx = json.load(f)
     with open(os.path.join(REPO, fx["memo_file"]), encoding="utf-8") as f:
@@ -209,7 +221,7 @@ def load_spec(question=None, fixture=FIXTURE):
         memo += "\n"
     canary = secrets.token_hex(8)
     return {"session_id": "s_" + "".join(secrets.choice(_ALNUM) for _ in range(12)),
-            "memo_id": fx["memo_id"], "memo": memo + "Ref: %s\n" % canary, "canary": canary,
+            "scenario": scenario, "memo_id": fx["memo_id"], "memo": memo + "Ref: %s\n" % canary, "canary": canary,
             "question": question if question is not None else fx["question"], "needs": fx["needs"],
             "confirmed_secrets": fx["confirmed_secrets"], "approved_public_terms": fx["approved_public_terms"]}
 
@@ -275,7 +287,7 @@ class _Run:
     def opening(self):
         s = self.spec
         self.emit("run_started", {"mode": self.mode, "source": self.source, "plant_careless": self.plant,
-                                  "question": s["question"]})
+                                  "question": s["question"], "scenario": s["scenario"]})
         self.emit("memo_loaded", {"memo_id": s["memo_id"], "title": _title(s["memo"]), "source": self.source,
                                   "text": s["memo"], "sha256": hashlib.sha256(s["memo"].encode("utf-8")).hexdigest(),
                                   "canary": s["canary"]})
@@ -286,7 +298,7 @@ class _Run:
     def planted_search(self):
         """The demo's careless query. Only the Gate sees it: it creates no need, is never read, emits no
         planner_typed and gives the Planner nothing. It is not a Planner action and uses none of its budget."""
-        a = CARELESS_ACTION
+        a = careless_action(self.spec["scenario"])
         resp = self.gate.search(self.sid, a["need"], a["query"], a["preset"])
         self.emit_ledger(resp, {"label": "Tavily search", "need": a["need"], "query": a["query"], "summary": None,
                                 "result_count": len(resp.get("result_ids") or []), "detail": resp.get("detail")},
@@ -380,7 +392,8 @@ class _Run:
                 return
             public_query = query_of[ids[0]][1]
         # the need exists once the Gate has taken the request (a refused request adds no "not found" need)
-        entry = self.needs.setdefault(need, {"need": need, "claim_types": [], "label": need_label(need)})
+        labels = scenarios.SCENARIOS[self.spec["scenario"]]["need_labels"]
+        entry = self.needs.setdefault(need, {"need": need, "claim_types": [], "label": need_label(need, labels)})
         entry["claim_types"] += [c for c in cts if c not in entry["claim_types"]]
         show(resp)
 
@@ -492,8 +505,10 @@ def _thread_main(run, started):
 
 
 def start_run(mode, source, plant_careless, question, emit, *, gate=None, next_action=None, baseline_runs=None,
-              today=None, budget=BUDGET):
+              today=None, budget=BUDGET, scenario=None):
+    """scenario: halyard or real_estate; None = DT_SCENARIO (app/scenario.py), default halyard."""
     global _active, _thread
+    scenario = scenarios.name() if scenario is None else scenarios.check(scenario)
     if mode not in MODES:
         raise ValueError("mode must be one of %s" % (MODES,))
     if source not in SOURCES:
@@ -514,7 +529,12 @@ def start_run(mode, source, plant_careless, question, emit, *, gate=None, next_a
             raise ValueError("a run is already active")
         _active = True
     try:
-        spec = load_spec(question)
+        fixture = scenarios.SCENARIOS[scenario]["fixture"]
+        # app/run.py (Ilia) fills in the Halyard fixture's question when the UI sends none; in another scenario
+        # that is the wrong memo's question, so that exact text means "this scenario's own question"
+        if scenario != scenarios.DEFAULT and question == _fixture_question(FIXTURE):
+            question = None
+        spec = load_spec(question, fixture=fixture, scenario=scenario)
         gate = gate or GateClient(gate_port())
         if next_action is None:
             from planner.planner import next_action
