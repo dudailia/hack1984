@@ -419,3 +419,5 @@ the `X-DT-Token` header).
   canary, secret.* and provenance.* rule above remains.
 - 2026-11-08: §10 ledger_row note: a recorded leak uses the same rule as run_done.leaks (canary, secret.*,
   provenance.*), replacing "rule is non-null". Text only.
+- 2026-11-08: §10 run_done adds optional `data.reason` (string or null): why the run failed, null when it did not.
+- 2026-11-08: §3 `/v1/read` error replies add `error` (code) and `detail` (text).
