@@ -8,12 +8,23 @@ import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_FIXTURES = os.path.join(HERE, "fixtures", "halyard")
+# DT_SCENARIO (app/scenario.py) -> page set. app/run.py starts this server as a child, so it inherits the variable.
+SCENARIO_FIXTURES = {"halyard": DEFAULT_FIXTURES, "real_estate": os.path.join(HERE, "fixtures", "real_estate")}
 PLANTED_MARKER = "{{PLANTED}}"
 
 TOP_SCORE = 0.92
 SCORE_STEP = 0.07
 
 _TOKEN = re.compile(r"[a-z0-9]+(?:/[a-z0-9]+)*")
+
+
+def fixtures_dir(environ=None):
+    """The page set for DT_SCENARIO: halyard (default, also unset or empty) or real_estate; else ValueError."""
+    env = os.environ if environ is None else environ
+    name = (env.get("DT_SCENARIO") or "").strip() or "halyard"
+    if name not in SCENARIO_FIXTURES:
+        raise ValueError("DT_SCENARIO must be one of %s" % ", ".join(sorted(SCENARIO_FIXTURES)))
+    return SCENARIO_FIXTURES[name]
 
 
 def load_pages(fixtures_dir=DEFAULT_FIXTURES):

@@ -64,19 +64,19 @@ def is_cloud_model(name) -> bool:
     return not isinstance(name, str) or name.strip().lower().endswith("cloud")
 
 
-def build_body(model, messages) -> dict:
-    return {"model": model, "think": False, "stream": False, "format": ACTION_JSON_SCHEMA,
+def build_body(model, messages, schema=ACTION_JSON_SCHEMA) -> dict:
+    return {"model": model, "think": False, "stream": False, "format": schema,
             "options": {"temperature": 0}, "messages": messages}
 
 
-def chat(messages, *, env=None, timeout=DEFAULT_TIMEOUT, urlopen=_OPENER.open) -> str:
+def chat(messages, *, env=None, timeout=DEFAULT_TIMEOUT, urlopen=_OPENER.open, schema=ACTION_JSON_SCHEMA) -> str:
     """POST to the local Ollama /api/chat; return the assistant message content."""
     env = env or load_env()
     if is_cloud_model(env["OLLAMA_MODEL"]):
         raise OllamaError("refusing an Ollama cloud model; the memo must stay local")
     port = int(env["OLLAMA_PORT"])
     url = f"http://{OLLAMA_HOST}:{port}/api/chat"
-    data = json.dumps(build_body(env["OLLAMA_MODEL"], messages), ensure_ascii=False).encode("utf-8")
+    data = json.dumps(build_body(env["OLLAMA_MODEL"], messages, schema), ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST", headers={"Content-Type": "application/json"})
     try:
         with urlopen(req, timeout=timeout) as resp:

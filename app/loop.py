@@ -311,10 +311,12 @@ class _Run:
         if self.plant:
             self.planted_search()
         seen, repeats, steps = set(), 0, 0
+        # the Planner profile is the scenario name (a fixed word, never web text); Halyard calls are as before
+        profile = {} if s["scenario"] == scenarios.DEFAULT else {"profile": s["scenario"]}
         while steps < self.budget:
             # Only memo, question, date and the typed objects. Copies, so nothing is shared by reference.
             action = self.next_action(s["memo"], s["question"], self.today,
-                                      [json.loads(json.dumps(t)) for t in typed_results])
+                                      [json.loads(json.dumps(t)) for t in typed_results], **profile)
             if action.get("action") == "done":
                 return
             key = action_key(action)

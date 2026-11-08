@@ -32,6 +32,11 @@ _MONEY = {"usd": ("$", ""), "usd_millions": ("$", " million"), "usd_billions": (
 # business ("Operating expense growth 9%"), so a growth claim whose subject names one is left out.
 MAX_GROWTH = 5
 _EXPENSE_SUBJECT_RE = re.compile(r"\b(?:expense|expenses|cost|costs|opex|spending)\b", re.IGNORECASE)
+# Real estate levels (FORMATS §1): a rate is a level, never growth; the label is added unless the subject says it.
+# Their subjects are markets, not companies, so they are never merged by leading words.
+RATE_LABELS = {"cap_rate": "cap rate", "vacancy_rate": "vacancy", "interest_rate": "interest rate"}
+PER_SQFT = "price_per_sqft"
+MARKET_TYPES = frozenset(RATE_LABELS) | {PER_SQFT}
 
 
 def _fmt(value):
@@ -113,6 +118,12 @@ def _item_phrase(item, year):
         return "context: %s %sx %s%s" % (s, v, MULTIPLE_LABELS[t], _period_phrase(p, "for"))
     if t in MULTIPLE_LABELS:
         return "%s trades at %sx %s%s" % (s, v, MULTIPLE_LABELS[t], _period_phrase(p, "for"))
+    if t in RATE_LABELS:
+        label = RATE_LABELS[t]
+        named = s if label in normalize(s).casefold() else "%s (%s)" % (s, label)
+        return "%s: %s%%%s" % (named, v, _period_phrase(p, "for"))
+    if t == PER_SQFT:
+        return "%s: $%s per sq ft%s" % (s, v, _period_phrase(p, "for"))
     if item["unit"] in _MONEY:
         pre, post = _MONEY[item["unit"]]
         return "%s: %s%s%s%s" % (s, pre, v, post, _period_phrase(p, "for"))
@@ -195,7 +206,7 @@ def _keys(claim, subject):
 
 def _repeats_company(claim, subject, companies):
     """One value per company (normalised subject) for each claim type and period; the first one is kept."""
-    if subject == WITHHELD_SUBJECT or _is_aggregate(claim):
+    if subject == WITHHELD_SUBJECT or _is_aggregate(claim) or claim["claim_type"] in MARKET_TYPES:
         return False
     words, tp = _company_words(subject), (claim["claim_type"], claim["period"])
     return any(tp == other_tp and _same_company(words, other) for other, other_tp in companies)

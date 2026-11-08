@@ -229,7 +229,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="python3 -m fake_tavily.server", description="Loopback Tavily stand-in")
     ap.add_argument("--port", type=int, default=None, help="default: FAKE_TAVILY_PORT from env/.env, else 8702")
     args = ap.parse_args(argv)
-    srv = make_server(port=args.port, verbose=True)
+    srv = make_server(port=args.port, fixtures_dir=pages.fixtures_dir(), verbose=True)  # DT_SCENARIO page set
     # After binding (so --port 0 and test ports keep working): from here on no connect, no further bind, no DNS
     # beyond loopback and no programs (invariant 1). The stand-in only answers on the socket it already has.
     guard.install_loopback_guard("fake_tavily")

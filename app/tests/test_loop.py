@@ -1113,6 +1113,15 @@ class TestScenarios(Base):
         self.assertTrue(text.startswith("Peer ev revenue:"), text)  # the generic fallback, not Halyard's label
         self.assertNotIn("payments", text.lower())
 
+    def test_planner_profile_follows_scenario(self):
+        p = Script(search("re_cap_rates", "revenue_growth", "office cap rates 2026"))
+        self.run_loop_scenario("real_estate", planner=p)
+        self.assertEqual([c[1] for c in p.calls], [{"profile": "real_estate"}] * 2)
+        self.assertEqual([len(c[0]) for c in p.calls], [4, 4])
+        h = Script(search())
+        self.run_loop_scenario("halyard", planner=h)
+        self.assertEqual([c[1] for c in h.calls], [{}, {}])  # Halyard calls are exactly as before
+
     def test_unknown_scenario_refused(self):
         g = StubGate()
         with self.assertRaises(ValueError):

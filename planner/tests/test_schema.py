@@ -213,7 +213,8 @@ class TestJsonSchema(unittest.TestCase):
         b = self.branches()
         for action in ("search", "extract"):
             p = b[action]["properties"]
-            self.assertEqual(set(p["claim_types"]["items"]["enum"]), set(schema.CLAIM_UNITS))
+            # the default (Halyard) grammar: the original eight types only (planner/tests/test_profiles.py)
+            self.assertEqual(set(p["claim_types"]["items"]["enum"]), set(schema.PROFILE_CLAIM_TYPES["halyard"]))
             self.assertEqual(p["need"]["pattern"], "^[a-z0-9_]{1,32}$")
         self.assertEqual(b["search"]["properties"]["query"]["maxLength"], schema.MAX_QUERY_CHARS)
         self.assertEqual(b["extract"]["properties"]["result_ids"]["maxItems"], schema.MAX_RESULT_IDS)
@@ -300,7 +301,15 @@ class TestNormalizePreset(unittest.TestCase):
     def test_claim_table(self):
         self.assertEqual(schema.CLAIM_UNITS["revenue_growth"], {"percent"})
         self.assertEqual(schema.CLAIM_UNITS["founded_year"], {"year"})
-        self.assertEqual(len(schema.CLAIM_UNITS), 8)
+        self.assertEqual(len(schema.CLAIM_UNITS), 12)  # 8 + the real estate four (FORMATS §1)
+        self.assertEqual(schema.CLAIM_UNITS["cap_rate"], {"percent"})
+        self.assertEqual(schema.CLAIM_UNITS["vacancy_rate"], {"percent"})
+        self.assertEqual(schema.CLAIM_UNITS["interest_rate"], {"percent"})
+        self.assertEqual(schema.CLAIM_UNITS["price_per_sqft"], {"usd"})
+
+    def test_same_table_as_the_reader(self):
+        from reader.schema import CLAIM_UNITS as READER
+        self.assertEqual(schema.CLAIM_UNITS, {k: set(v) for k, v in READER.items()})
 
 
 if __name__ == "__main__":

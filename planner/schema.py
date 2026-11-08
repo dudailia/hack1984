@@ -11,8 +11,30 @@ CLAIM_UNITS = {
     "market_size": {"usd", "usd_millions", "usd_billions"},
     "employees": {"count"},
     "founded_year": {"year"},
+    # real estate scenario (FORMATS §1): existing units only
+    "cap_rate": {"percent"},
+    "vacancy_rate": {"percent"},
+    "interest_rate": {"percent"},
+    "price_per_sqft": {"usd"},
 }
 UNITS = set().union(*CLAIM_UNITS.values())
+
+# The claim types each Planner profile (one per demo scenario, app/scenario.py) may name. Halyard is the default
+# and keeps exactly the original eight, so its prompt and grammar are unchanged byte for byte.
+DEFAULT_PROFILE = "halyard"
+PROFILE_CLAIM_TYPES = {
+    "halyard": ("revenue", "revenue_growth", "ev_revenue_multiple", "ev_ebitda_multiple", "ebitda", "market_size",
+                "employees", "founded_year"),
+    "real_estate": ("interest_rate", "cap_rate", "vacancy_rate", "price_per_sqft", "market_size", "revenue_growth"),
+}
+
+
+def profile_claim_types(profile=None):
+    """The claim types of a profile (None = the default). Raises ValueError for an unknown profile."""
+    p = DEFAULT_PROFILE if profile is None else profile
+    if not isinstance(p, str) or p not in PROFILE_CLAIM_TYPES:
+        raise ValueError("unknown planner profile")
+    return PROFILE_CLAIM_TYPES[p]
 SEARCH_PRESETS = {"general", "finance", "news"}
 EXTRACT_PRESETS = {"text", "tables"}
 MAX_RESULT_IDS = 20
@@ -63,9 +85,11 @@ def _list(v, what, lo, hi):
     return v
 
 
-def validate_action(obj, known_ids=None) -> dict:
+def validate_action(obj, known_ids=None, profile=None) -> dict:
     """Return a clean copy of a valid action or raise SchemaError.
-    known_ids: if given, every extract result_id must be in it."""
+    known_ids: if given, every extract result_id must be in it.
+    profile: claim_types must be the profile's (None = the default, Halyard)."""
+    allowed = profile_claim_types(profile)
     if not isinstance(obj, dict):
         raise SchemaError("action: not an object")
     action = obj.get("action")
@@ -76,9 +100,9 @@ def validate_action(obj, known_ids=None) -> dict:
         return {"action": "done"}
 
     need = _match(NEED_RE, obj["need"], "need")
-    cts = _list(obj["claim_types"], "claim_types", 1, len(CLAIM_UNITS))
+    cts = _list(obj["claim_types"], "claim_types", 1, len(allowed))
     for ct in cts:
-        if not isinstance(ct, str) or ct not in CLAIM_UNITS:
+        if not isinstance(ct, str) or ct not in allowed:
             raise SchemaError("claim_types: unknown type")
     preset = obj["preset"]
     out = {"action": action, "need": need, "claim_types": list(cts)}
@@ -165,7 +189,6 @@ def validate_typed_list(items) -> list:
 # the same nudge gives extract + "text" 5/5 with this schema, extract + "general" 5/5 with the old flat one.
 # validate_action still enforces every rule; normalize_preset stays as the safety net.
 _NEED = {"type": "string", "pattern": "^[a-z0-9_]{1,32}$"}
-_CLAIM_TYPES = {"type": "array", "minItems": 1, "items": {"type": "string", "enum": sorted(CLAIM_UNITS)}}
 
 
 def _branch(action, extra):
@@ -173,15 +196,21 @@ def _branch(action, extra):
     return {"type": "object", "properties": props, "required": sorted(props), "additionalProperties": False}
 
 
-ACTION_JSON_SCHEMA = {
-    "anyOf": [
-        _branch("search", {"need": _NEED, "claim_types": _CLAIM_TYPES,
-                           "query": {"type": "string", "maxLength": MAX_QUERY_CHARS},
-                           "preset": {"type": "string", "enum": sorted(SEARCH_PRESETS)}}),
-        _branch("extract", {"need": _NEED, "claim_types": _CLAIM_TYPES,
-                            "result_ids": {"type": "array", "minItems": 1, "maxItems": MAX_RESULT_IDS,
-                                           "items": {"type": "string", "pattern": "^r_[0-9]{2}$"}},
-                            "preset": {"type": "string", "enum": sorted(EXTRACT_PRESETS)}}),
-        _branch("done", {}),
-    ]
-}
+def action_json_schema(profile=None):
+    """The Ollama grammar for a profile: claim_types enum = that profile's types (None = the default, Halyard)."""
+    cts = {"type": "array", "minItems": 1, "items": {"type": "string", "enum": sorted(profile_claim_types(profile))}}
+    return {
+        "anyOf": [
+            _branch("search", {"need": _NEED, "claim_types": cts,
+                               "query": {"type": "string", "maxLength": MAX_QUERY_CHARS},
+                               "preset": {"type": "string", "enum": sorted(SEARCH_PRESETS)}}),
+            _branch("extract", {"need": _NEED, "claim_types": cts,
+                                "result_ids": {"type": "array", "minItems": 1, "maxItems": MAX_RESULT_IDS,
+                                               "items": {"type": "string", "pattern": "^r_[0-9]{2}$"}},
+                                "preset": {"type": "string", "enum": sorted(EXTRACT_PRESETS)}}),
+            _branch("done", {}),
+        ]
+    }
+
+
+ACTION_JSON_SCHEMA = action_json_schema()  # Halyard, the default
