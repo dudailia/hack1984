@@ -118,6 +118,13 @@ def run_theme(port, theme, workdir):
 
 
 def browser_version():
+    # macOS: the app bundle's Info.plist holds the version (BROWSER is <App>.app/Contents/MacOS/<name>).
+    plist = os.path.join(os.path.dirname(os.path.dirname(BROWSER)), "Info.plist")
+    if os.path.isfile(plist):
+        import plistlib
+        with open(plist, "rb") as f:
+            info = plistlib.load(f)
+        return f"{info.get('CFBundleName', os.path.basename(BROWSER))} {info.get('CFBundleShortVersionString', '')}".strip()
     root = os.path.dirname(BROWSER)
     versions = [d for d in os.listdir(root) if re.match(r"^\d+(\.\d+)+$", d)] if os.path.isdir(root) else []
     return f"{os.path.basename(BROWSER)} {max(versions, key=lambda v: [int(x) for x in v.split('.')]) if versions else ''}".strip()
@@ -190,7 +197,8 @@ def main(out=EVIDENCE):
         "- Background browser traffic is reduced (`--disable-background-networking` and related flags).",
         "- Every non-loopback host is mapped to NOTFOUND (`--host-resolver-rules`), so any attempt fails its lookup and"
         " cannot leave.",
-        "- Edge's own services still try a few lookups (autofill, network time, experiments). They are listed as"
+        "- The browser's own services (Edge or Chrome: updates, sign-in, network time, experiments) still try a few"
+        " lookups. They are listed as"
         " *browser requests*: none was initiated by the page. If the browser tries a connect anyway (for example a"
         " QUIC attempt to a built-in address), it is listed with its outcome; the check fails on any *successful*"
         " connect to an address other than 127.0.0.1.",
