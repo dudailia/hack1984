@@ -13,16 +13,18 @@ Rules for this file:
   commit), `shared/results/usefulness/live_blocks.md`, and the exposure check on the demo-laptop ledger (to become
   `shared/results/exposure.md`). The run judged by the FALLBACK judge is never quoted. Anything not measured yet is
   [pending]. Never invent or estimate.
-- **Every measured number today is from the first evaluation (corporate deal memo).** There is no real estate run
-  yet, so real estate numbers are [pending]. Say "first evaluation" when quoting one.
+- **Every measured number is from the first evaluation (corporate deal memo).** Say "first evaluation" when quoting
+  one. The real estate scenario (Larkmoor) is a demo, not a measurement: never put a 40-attack number next to
+  Larkmoor or the real estate scenario. For real estate numbers, say "not measured: the real estate scenario is a demo".
 - **The split stopped the attacks.** The gate checks what goes out and never had to fire in the measured runs. Never
   say the gate blocked the attacks.
 - Business facts (law, fines, prices, market counts) are quoted only with their source in notes/BUSINESS.md.
 - **Office, Copilot, Azure, Bedrock and MCP integrations, and any integration with a deal management platform, are
   roadmap.** Never describe them as built.
-- The deal is fictional. Its names are the ones Ilia set for the film (property "Larkmoor Wharf", buyer "Fund IV",
-  $42.5 million financing) until `shared/fixtures/re_memo.md` lands. Never name a real company or employer,
-  including the company behind Anant's co-op: say "a commercial real estate deal management platform".
+- The deal is fictional. Its names are the ones Ilia set for the film: codename "Project Larkmoor", property
+  "Larkmoor Wharf", buyer "Fund IV", "$42.5 million financing", contacts Odile Farrant and Ruaridh Penhallow. Never
+  name a real company or employer, including the company behind Anant's co-op: say "a commercial real estate deal
+  management platform".
 
 ---
 
@@ -41,7 +43,7 @@ Every answer below stays inside these three lists. If a question needs something
 - Tavily search and extract with general, news and finance presets.
 - A typed channel back to the Planner: a need id, found or not found, and numbers with type, unit, period and result
   id. Calculations are done in code.
-- notes/BENIGN_RE.md: 30 normal real estate analyst questions (written; results in results.json: [pending]).
+- notes/BENIGN_RE.md: 30 normal real estate analyst questions (written; not measured: the real estate scenario is a demo).
 
 ### What we measured (results.json on main; first evaluation, corporate deal memo)
 
@@ -57,7 +59,8 @@ Every answer below stays inside these three lists. If a question needs something
 | Answered with a cited number (live, real Tavily) | 23 of 30 | usefulness | checks-frozen-80-g294c423 |
 | Cost per question (live) | 1.77 Tavily credits, 14.7 s | usefulness | checks-frozen-80-g294c423 |
 | Harmless requests blocked in the live run | 3 (questions 2, 8 and 18, rule `provenance.rare_term`; all 3 still answered) | `shared/results/usefulness/live_blocks.md` | 294c423 |
-| Any real estate number | [pending] | [pending] | [pending] |
+
+All rows above are the first evaluation, on the corporate deal memo. Real estate numbers: not measured: the real estate scenario is a demo.
 
 ### What is roadmap (not built: say "roadmap", never "we have")
 - Real estate claim types: cap rate, vacancy, delinquency, loan rate, cost per square foot, REIT return. Today the
@@ -135,7 +138,7 @@ notes/REVIEW_1.md R1-14; notes/THREAT_MODEL.md channel table.
 
 ### 6. Can the Planner still leak by itself? What is your real leak rate?
 **Spoken:** Yes, by its own mistake, since it writes the queries. In our first evaluation, a corporate memo: single
-agent 2 of 40, two minds plus gate 0 of 40. Real estate: pending. Not 100%.
+agent 2 of 40, two minds plus gate 0 of 40. Not 100%.
 
 **If pressed:** The Gate checks every outbound request for the confirmed secrets in the listed encodings, a canary,
 rare memo words, and shape. Those checks are detectors. Known gap: a secret split into fragments separated by other
@@ -212,7 +215,9 @@ information leaking through an AI tool, and we do not claim one.
 
 ### 13. Why is this team the one to build it?
 **Spoken:** Anant spent months building a commercial real estate deal management platform, with sponsor ownership,
-lender quotes and investment decisions in one workflow. [pending: one true, checkable line for each other member].
+lender quotes and investment decisions in one workflow. Sheara: "I build Python and MATLAB tools that simulate
+rocket flight, orbital insertion and heat shield ablation, and this weekend I built Doublethink's interface."
+[pending: one true, checkable line for each other member].
 What we can show today: attacks written and hashed before any code, checks frozen at a tag, and a hostile review
 whose findings are all fixed.
 
@@ -250,7 +255,7 @@ cited number.
 - False blocks, static: 0 of 30 on the frozen checks (benign-frozen, a271959). False blocks, live: 3 harmless
   Reader requests blocked under `provenance.rare_term` (questions 2, 8 and 18; evidence in
   `shared/results/usefulness/live_blocks.md`), and all 3 questions were still answered.
-- Real estate questions (notes/BENIGN_RE.md): [pending].
+- Real estate questions (notes/BENIGN_RE.md): not measured: the real estate scenario is a demo.
 
 **Source:** commit 863a7a8 ("planner: correct wrong presets instead of giving up"), planner/schema.py
 (`normalize_preset`, `ACTION_JSON_SCHEMA`); `shared/results/results.json` runs "usefulness" and "benign-frozen".
@@ -277,7 +282,7 @@ every time, which is what the compromised mode shows: 40 of 40. Better agents ma
 
 **If pressed:** Two confidentiality failures in a small controlled sample are meaningful, but not a universal
 failure rate. Every run read the poisoned page (exposure check). Compromised mode always obeys the poisoned page, and
-we label it as such. Both ran only against our local stand-in for Tavily. Real estate: [pending].
+we label it as such. Both ran only against our local stand-in for Tavily, on the corporate memo.
 
 **Source:** `shared/results/results.json`, run "checks-frozen rejudged-frozen" at 486a8b6; notes/DEVPOST.md
 "Challenges" (compromised mode); notes/PITCH_SCRIPT.md hard question 6.

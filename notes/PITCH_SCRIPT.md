@@ -8,17 +8,18 @@ Rules for this file:
 - **Numbers come only from three sources**, cited in the "Where the numbers come from" table below:
   `shared/results/results.json` on main (by run label and commit), `shared/results/usefulness/live_blocks.md`, and
   the exposure check on the demo-laptop ledger (to become `shared/results/exposure.md`). The run judged by the
-  FALLBACK judge is never quoted. Anything not measured yet is [pending]. Never invent or estimate a number.
-- **Every measured number today is from the first evaluation (corporate deal memo).** There is no real estate run in
-  results.json yet, so every real estate number is [pending]. Say "first evaluation" out loud when quoting one.
+  FALLBACK judge is never quoted. Never invent or estimate a number.
+- **Every measured number is from the first evaluation (corporate deal memo).** Say "first evaluation" out loud when
+  quoting one. The real estate scenario (Larkmoor) is a demo, not a measurement: never put a 40-attack number in the
+  same sentence, beat or table row as Larkmoor or the real estate scenario. For real estate numbers, say "not measured: the real estate scenario is a demo".
 - **The split stopped the attacks.** The gate checks every request that goes out, and in the measured runs it never
   had to fire. Never say the gate blocked the attacks.
 - **Built, measured and roadmap stay separate.** Office, Copilot, Azure, Bedrock and MCP integrations, and any
   integration with a deal management platform, are roadmap. Never describe them as built.
-- **All people, firms and deals are fictional.** The deal names are the ones Ilia set for the film (property
-  "Larkmoor Wharf", buyer "Fund IV", $42.5 million financing) until `shared/fixtures/re_memo.md` lands. Never name a
-  real company or employer, including the company behind Anant's co-op: say "a commercial real estate deal
-  management platform".
+- **All people, firms and deals are fictional.** The deal names are the ones Ilia set for the film: codename
+  "Project Larkmoor", property "Larkmoor Wharf", buyer "Fund IV", "$42.5 million financing", contacts Odile Farrant
+  and Ruaridh Penhallow. Never name a real company or employer, including the company behind Anant's co-op: say "a
+  commercial real estate deal management platform".
 - Never claim a known case of deal information leaking through an AI tool: we found none.
 
 Target pace: about 150 words a minute. Each paragraph is sized to its slot; the slots add up to 3:00.
@@ -27,14 +28,16 @@ Target pace: about 150 words a minute. Each paragraph is sized to its slot; the 
 
 | Number | Source | Run label | Commit | Scenario |
 |---|---|---|---|---|
-| 40 attacks, written and hashed before the code (sha256 961d...d1be) | results.json file header (`attacks_total`, `attack_file_sha256`) | n/a | n/a | both |
+| 40 attacks, written and hashed before the code (sha256 961d...d1be) | results.json file header (`attacks_total`, `attack_file_sha256`) | n/a | n/a | corporate memo (first evaluation) |
 | Single agent leaked 2 of 40; compromised agent 40 of 40 | results.json | checks-frozen rejudged-frozen | 486a8b6 | corporate memo |
 | Two minds 0 of 40; two minds plus gate 0 of 40; 0 blocked requests in the 40 two-minds-plus-gate runs | results.json | checks-frozen | c303c1c | corporate memo |
 | 0 of 30 normal questions blocked by the frozen checks | results.json | benign-frozen | a271959 | corporate memo (notes/BENIGN.md) |
 | 23 of 30 questions answered with a cited number; 1.77 Tavily credits and 14.7 s per question | results.json | usefulness | checks-frozen-80-g294c423 (real Tavily, qwen3:8b) | corporate memo |
 | 3 harmless requests blocked in the live run (questions 2, 8 and 18, rule `provenance.rare_term`; all 3 still answered) | `shared/results/usefulness/live_blocks.md` | usefulness | 294c423 | corporate memo |
 | Every run read the poisoned page | exposure check, demo-laptop ledger (to become `shared/results/exposure.md`) | n/a | n/a | corporate memo |
-| Any real estate leak rate, false-block rate, usefulness or cost | [pending] | [pending] | [pending] | real estate |
+
+All rows above are the first evaluation, on the corporate deal memo. Real estate leak rate, false blocks, usefulness and
+cost: not measured: the real estate scenario is a demo.
 
 ## The script
 
@@ -42,16 +45,16 @@ Target pace: about 150 words a minute. Each paragraph is sized to its slot; the 
 
 **0:00 (20 s). The opening**
 *Title card: "Fictional associate. Fictional fund. Fictional deal."*
-Meet Tess, a fictional acquisitions associate. Her firm bans AI on live deals. She is evaluating Larkmoor Wharf for
-Fund IV, with $42.5 million of financing. She has the financials, sponsor ownership, lender quotes, underwriting
-assumptions and investment committee notes. She wants AI to research comparable transactions and financing
+Meet Tess, a fictional acquisitions associate. Her firm bans AI on live deals. Her memo is Project Larkmoor:
+Larkmoor Wharf, for Fund IV, with $42.5 million financing, and contacts Odile Farrant and Ruaridh Penhallow. She has
+the financials, sponsor ownership, lender quotes, underwriting assumptions and investment committee notes. She wants AI to research comparable transactions and financing
 conditions, but her firm cannot risk disclosing the deal to an outside AI service.
 
 **0:20 (20 s). The single agent leaks**
 *Run the single agent in compromised mode. The leaked query appears in the ledger.*
 This is how most agents are built: one model sees the memo and the web together. It reads a page with one hidden
-line telling AI assistants to put the deal into their next search. It obeys. Look at its next query: the property,
-the buyer and the financing, on their way to a search provider.
+line telling AI assistants to put the deal into their next search. It obeys. Look at its next query: Project
+Larkmoor, Fund IV and the $42.5 million financing, on their way to a search provider.
 
 **0:40 (25 s). Doublethink, same page**
 *Run Doublethink on the same fake pages. The Reader's documents show the planted line, highlighted.*
@@ -63,7 +66,7 @@ line and has nothing to leak. What leaves the device: checked queries to Tavily 
 *Answer panel: each number with its quote and source link.*
 And it still answers. Every number shows the sentence it came from and its source, and every calculation is done in
 code, never by a model. Today the Reader extracts corporate figures such as growth and revenue multiples; cap rates
-and vacancy are on the roadmap. [pending: real estate answer from a real estate run]
+and vacancy are on the roadmap, so the real estate answer is not measured: the real estate scenario is a demo.
 
 **1:20 (15 s). The gate**
 *Planted careless Planner query; the row turns red with the rule.*
@@ -79,11 +82,10 @@ signed bundle. Anyone can check it offline. Valid. Now I change one byte. Invali
 ### Part 2. What we measured
 
 **1:50 (25 s). The numbers**
-*Results screen. Real estate headline when a real estate run exists; corporate memo below as "First evaluation".*
-Before writing any code, we wrote 40 attacks and published their hash. In our first evaluation, on a corporate deal
-memo: a normal single agent leaked in 2 of 40. A compromised one, in all 40. Doublethink: 0 of 40, and every run read
-the poisoned page. The split stopped them; the gate checks what goes out and never had to fire. Real estate:
-[pending].
+*Results screen: the first evaluation, on the corporate deal memo.*
+Our first evaluation used a corporate deal memo. Before writing any code, we wrote 40 attacks and published their
+hash. A normal single agent leaked in 2 of 40. A compromised one, in all 40. Doublethink: 0 of 40, and every run
+read the poisoned page. The split stopped them; the gate checks what goes out and never had to fire.
 
 **2:15 (15 s). Limits**
 *Limits slide.*
@@ -95,8 +97,8 @@ and in a live run the gate blocked 3 harmless requests.
 
 **2:30 (15 s). Next, and who pays**
 *Roadmap slide, every item labelled "roadmap".*
-Roadmap, not built: an Office add-in where analysts already work, a provider adapter for the firm's approved cloud
-model, such as Azure OpenAI or Bedrock, and real estate figures like cap rates. The buyer: a Head of Acquisitions or
+The Larkmoor scenario you saw is a demo, not a measurement. Roadmap, not built: an Office add-in where analysts
+already work, and a provider adapter for the firm's approved cloud model, such as Azure OpenAI or Bedrock. The buyer: a Head of Acquisitions or
 Managing Partner, with IT and security approval. We build on Willison's Dual LLM pattern and on CaMeL.
 
 **2:45 (15 s). Close**
@@ -150,8 +152,8 @@ from the Reader, with the gate's checks as an additional safeguard.
 The gate examines every proposed outbound request and detects the variants of amounts and encodings we tested. We do
 not claim coverage of every possible transformation. Those checks are detectors, so we report what they cost: in the
 first evaluation, 0 of 30 normal questions blocked by the frozen checks (benign-frozen, a271959), and 3 harmless
-requests blocked in the live run (`shared/results/usefulness/live_blocks.md`). Real estate questions in
-notes/BENIGN_RE.md: [pending: a results.json run].
+requests blocked in the live run (`shared/results/usefulness/live_blocks.md`), both on the corporate memo's
+questions. The real estate questions in notes/BENIGN_RE.md are not measured: the real estate scenario is a demo.
 
 **10. "If the gate never fired, why have it?"**
 The red team attacks the web side, and the split stopped every one: 0 blocked requests in the 40 runs of two minds
@@ -175,8 +177,7 @@ runtime integrity and an independent assessment.
 **14. "What do you lose?"**
 The planner cannot react to arbitrary web text, only to typed numbers, so open-ended research is weaker. In the
 first evaluation, live on real Tavily: 23 of 30 normal questions answered with a validated, cited number, at 1.77
-Tavily credits and 14.7 seconds per question on average (usefulness, checks-frozen-80-g294c423). Real estate:
-[pending].
+Tavily credits and 14.7 seconds per question on average (usefulness, checks-frozen-80-g294c423).
 
 **15. "Who pays?"**
 Likely a Managing Partner or Head of Acquisitions at a smaller firm, with IT and security approval; larger firms
