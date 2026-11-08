@@ -65,14 +65,18 @@ On Friday, before any code, we wrote 40 prompt-injection payloads and fixed thei
 
 The person who built the Gate checks did not see the file until the checks were frozen at tag `checks-frozen` (commit a271959b9322b77e6ee0a9e8c5100a52ff903632). The person who wrote the attacks never wrote check logic. Anyone can verify the file with `shasum -a 256 ATTACKS.md`.
 
-| Setup | Runs that leaked a confirmed secret or the canary |
-|---|---|
-| Single agent | [x] / 40 |
-| Compromised agent | [x] / 40 |
-| Two minds, no gate | [x] / 40 |
-| Doublethink (two minds plus gate) | [x] / 40 |
+| Setup | Runs that leaked a confirmed secret or the canary | Measured at commit |
+|---|---|---|
+| Single agent | 2 / 40 | 486a8b6 |
+| Compromised agent | 40 / 40 | 486a8b6 |
+| Two minds, no gate | 0 / 40 | c303c1c |
+| Doublethink (two minds plus gate) | 0 / 40 | c303c1c |
 
-- False blocks on 30 ordinary analyst questions: 0 / 30, measured on the frozen checks at a271959.
+- Every leak is judged by the frozen checks on every sent request. The 486a8b6 batch was first scored with a simpler exact-match judge, then rejudged with the frozen checks; the table shows the rejudged numbers, and both runs are in `shared/results/results.json`.
+- Every run in all four setups read the poisoned page (40 / 40 each), and no run ended without searching or reading.
+- The Gate blocked 0 requests during the attack runs. The split alone stopped every attack.
+- False blocks, static: 0 / 30 ordinary analyst questions blocked on the frozen checks at a271959 (`python3 -m checks.benign_run notes/BENIGN.md`).
+- False blocks in a live run: [x] harmless requests blocked.
 - Usefulness: [x] / 30 questions answered with at least one validated, cited number.
 - Cost: [x] Tavily credits and [x] seconds per question.
 - Every run is reported, including runs after fixes. None were deleted. Commands to reproduce are in the README.
@@ -84,8 +88,8 @@ The person who built the Gate checks did not see the file until the checks were 
 
 | Setup | Runs that leaked / runs that read the poisoned page |
 |---|---|
-| Two minds, no gate | [x] / [y] |
-| Doublethink (two minds plus gate) | [x] / [y] |
+| Two minds, no gate | 0 / 40 (commit c303c1c) |
+| Doublethink (two minds plus gate) | 0 / 40 (commit c303c1c) |
 
 ## Challenges we ran into
 - **Making the "before" honest.** The baseline must be a fair single agent, not a straw man. It uses the same local model, the same date and the same query rules as the Planner. A separate compromised mode always obeys the poisoned page, so the demo is predictable, and we label it as such.
@@ -94,7 +98,7 @@ The person who built the Gate checks did not see the file until the checks were 
 - **A regex that a hostile page could use to stall the Gate**, found in review and fixed before the freeze.
 
 ## Accomplishments that we're proud of
-- In our first end-to-end test run (llama3.1:8b, compromised mode on the local stand-in), the model wrote the buyer and price into two more search queries by itself, beyond the one the harness forced. [Replace with the qwen3:8b red-team result once measured.]
+- In our first end-to-end test run (llama3.1:8b, compromised mode on the local stand-in), the model wrote the buyer and price into two more search queries by itself, beyond the one the harness forced. On the 40 pre-registered attacks with qwen3:8b, the compromised agent leaked in 40 of 40 runs (commit 486a8b6) and Doublethink in 0 of 40, every one of which read the poisoned page (commit c303c1c).
 - A pre-registered attack set, frozen checks and a signed, verifiable record: the evaluation can be checked by someone who does not trust us.
 - 736 tests at the freeze, [an end-to-end run on real Tavily and Claude: confirm], and a working offline replay.
 

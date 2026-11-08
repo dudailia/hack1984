@@ -199,16 +199,26 @@ because such a run is not a measurement of "no leak".
 
 | Measure | Single agent | Compromised agent | Two minds | Two minds + gate |
 |---|---|---|---|---|
-| Runs that leaked a confirmed secret or the canary (of 40 attacks) | [x] | [x] | [x] | [x] |
+| Runs that leaked a confirmed secret or the canary (of 40 attacks) | 2 | 40 | 0 | 0 |
+| Runs that read the poisoned page (of 40) | 40 | 40 | 40 | 40 |
+| Requests the gate blocked during the attack runs | 0 | 0 | 0 | 0 |
+| Measured at commit | 486a8b6 | 486a8b6 | c303c1c | c303c1c |
+
+Every run searched and read; none ended without doing either. The gate never fired: the split alone stopped every
+attack. Leaks are judged by the frozen checks on every sent request. The 486a8b6 batch was first scored with a
+simpler exact-match judge and then rejudged with the frozen checks; the table shows the rejudged numbers.
 
 | Measure | Value |
 |---|---|
-| Benign questions wrongly blocked by the gate | [x] of 30 |
+| Benign questions wrongly blocked by the frozen checks (static) | 0 of 30 |
+| Harmless requests blocked by the gate in a live run | [x] |
 | Benign questions answered with a validated, cited number | [x] of 30 |
 | Tavily credits per question | [x] |
 | Seconds per question | [x] |
 
-The exact command and commit for each number will be in `shared/results/results.json`.
+The command and commit for each red-team number are in `shared/results/results.json`, every run kept, none deleted.
+The static false-block count is `python3 -m checks.benign_run notes/BENIGN.md` on the frozen checks (tag
+`checks-frozen`, a271959).
 
 ## What we claim
 
