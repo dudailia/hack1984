@@ -65,7 +65,8 @@ class TestRetry(unittest.TestCase):
         self.assertEqual(len(m.calls), 2)
 
     def test_invalid_twice_done(self):
-        for bad in (("{", "{"), ({"action": "fetch"}, dict(SEARCH, preset="tables")),
+        # (A wrong preset is no longer "invalid": it is corrected, see TestPresetCorrection. A bad need still is.)
+        for bad in (("{", "{"), ({"action": "fetch"}, dict(SEARCH, need="Not A Need")),
                     (ollama.OllamaError("down"), ollama.OllamaError("down")),
                     (dict(SEARCH, url="x"), "[]")):
             m = FakeModel(*bad)
@@ -88,6 +89,59 @@ class TestRetry(unittest.TestCase):
         with contextlib.redirect_stderr(buf):
             next_action(MEMO, Q, TODAY, [], chat=FakeModel("zq9leak", "zq9leak"))
         self.assertNotIn("zq9leak", buf.getvalue())
+
+
+class TestPresetCorrection(unittest.TestCase):
+    """qwen3:8b in batch 2 often answered extract + "general". That used to fail twice and end the run with done,
+    so research stopped. Now the preset alone is corrected in ONE call and the action goes ahead."""
+
+    EXTRACT = {"action": "extract", "need": "sector_growth", "claim_types": ["revenue_growth"],
+               "result_ids": ["r_01"], "preset": "text"}
+
+    def call(self, model, typed=None):
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            out = next_action(MEMO, Q, TODAY, typed or [], chat=model)
+        return out, buf.getvalue()
+
+    def test_extract_with_search_preset_goes_ahead_in_one_call(self):
+        m = FakeModel(dict(self.EXTRACT, preset="general"))
+        out, err = self.call(m, [READ_RESPONSE["typed"]])
+        self.assertEqual(out, self.EXTRACT)
+        self.assertEqual(len(m.calls), 1)
+        self.assertNotIn("failed", err)
+        self.assertEqual(err.count("\n"), 1)
+        self.assertIn("corrected extract preset", err)
+
+    def test_search_with_extract_preset_goes_ahead(self):
+        m = FakeModel(dict(SEARCH, preset="tables"))
+        out, err = self.call(m)
+        self.assertEqual(out, SEARCH)
+        self.assertEqual(len(m.calls), 1)
+        self.assertIn("corrected search preset", err)
+
+    def test_correct_preset_logs_nothing(self):
+        out, err = self.call(FakeModel(SEARCH))
+        self.assertEqual((out, err), (SEARCH, ""))
+
+    def test_log_never_contains_model_text(self):
+        out, err = self.call(FakeModel(dict(SEARCH, preset="zq9leak free text")))
+        self.assertEqual(out, SEARCH)
+        self.assertNotIn("zq9leak", err)
+
+    def test_unknown_id_still_rejected_after_correction(self):
+        bad = dict(self.EXTRACT, result_ids=["r_07"], preset="general")
+        m = FakeModel(bad, bad)
+        out, err = self.call(m, [READ_RESPONSE["typed"]])
+        self.assertEqual(out, DONE)
+        self.assertEqual(len(m.calls), 2)
+        self.assertIn("not seen in typed results", err)
+
+    def test_extra_key_still_rejected_after_correction(self):
+        bad = dict(SEARCH, preset="tables", url=POISON_URL)
+        out, err = self.call(FakeModel(bad, bad))
+        self.assertEqual(out, DONE)
+        self.assertNotIn("zq9poison", err)
 
 
 class TestInputs(unittest.TestCase):
