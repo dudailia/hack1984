@@ -19,7 +19,17 @@
   if (q.get('theme') === '1984') document.getElementById('theme').href = '../styles-1984.css';
   const name = /^[a-z0-9_-]+\.json$/.test(q.get('file') || '') ? q.get('file') : 'results_two_scenarios.json';
   const data = await (await fetch(`fixtures/${name}`, { cache: 'no-store' })).json();
-  window.Results.render(document.getElementById('results'), data, { example: false, source: `ui/tests/fixtures/${name} (test fixture)` });
+  const box = document.getElementById('results');
+  window.Results.render(box, data, { example: false, source: `ui/tests/fixtures/${name} (test fixture)` });
+  // Same look as the ?example=1 banner: these numbers come from a test fixture, not a measurement.
+  const banner = document.createElement('div');
+  banner.className = 'example-banner';
+  banner.setAttribute('role', 'note');
+  const sub = document.createElement('span');
+  sub.className = 'example-banner-sub';
+  sub.textContent = `Rendered by ui/tests/results.preview.html from ui/tests/fixtures/${name}. Not part of the demo.`;
+  banner.append('TEST FIXTURE, not measured', sub);
+  box.prepend(banner);
 })();
 </script>
 </body>
