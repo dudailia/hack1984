@@ -1548,8 +1548,13 @@
       return;
     }
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
-    if (LIVE && titleShown()) { hideTitle(); return; }
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    // Live: any key leaves the title screen; a shortcut key (S, T, V, A, 1, 2) also does its job, so S opens the
+    // results screen at once instead of needing a second press.
+    if (LIVE && titleShown()) {
+      hideTitle();
+      if (!['s', 't', 'v', 'a', '1', '2'].includes(k)) return;
+    }
     const replayOnly = (fn) => { if (!LIVE) fn(); };
     switch (k) {
       case ' ': e.preventDefault(); replayOnly(() => (R.playing ? pause() : play())); break;

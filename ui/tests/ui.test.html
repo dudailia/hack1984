@@ -651,6 +651,44 @@
       ok(`poisoned page stays in view in the Reader room (${checked} seeks)`, readerJobs.length > 0 && misses.length === 0, misses.join(', '));
     }
 
+    // ---------- live mode (token present): title wording and the S key ----------
+    // The page is opened with a token, so it is in live mode; /events is not served here, so no event arrives (the
+    // page shows "Live stream lost" and keeps its empty state). Nothing leaves 127.0.0.1.
+    {
+      const liveLoad = async (query) => {
+        await new Promise((resolve) => { frame.onload = resolve; frame.src = `../index.html?token=test-token&${query}`; });
+        for (let i = 0; i < 200; i += 1) {
+          const d = frame.contentDocument;
+          if (d && d.body && d.body.classList.contains('live') && d.getElementById('results')) { await sleep(150); return d; }
+          await sleep(25);
+        }
+        throw new Error('live page did not load');
+      };
+      const key = (d, k) => d.dispatchEvent(new d.defaultView.KeyboardEvent('keydown', { key: k, bubbles: true }));
+      for (const th of ['console', '1984']) {
+        let d = await liveLoad(`theme=${th}&view=audit`);
+        const title = d.getElementById('title');
+        const shown = [...title.querySelectorAll('.title-small')].filter((n) => visible(d, n)).map((n) => n.innerText.trim()).join(' ');
+        ok(`live: title screen does not say offline replay (${th})`, title.classList.contains('show') && !/offline replay/i.test(shown) && /fictional/i.test(shown), shown);
+        // S opens the results screen in live mode, also when the title screen is still up.
+        key(d, 's');
+        ok(`live: S opens the results screen with the title screen up (${th})`, d.getElementById('results').classList.contains('open') && !title.classList.contains('show'), `open=${d.getElementById('results').classList.contains('open')} title=${title.classList.contains('show')}`);
+        key(d, 's');
+        ok(`live: S closes it again (${th})`, !d.getElementById('results').classList.contains('open'), 'still open');
+        d = await liveLoad(`theme=${th}&view=audit&title=0`);
+        key(d, 's');
+        ok(`live: S opens the results screen (${th})`, d.getElementById('results').classList.contains('open'), 'not open');
+      }
+      const d = await liveLoad('theme=console');
+      key(d, 's');
+      ok('live: S opens the results screen over the Analyst view', d.getElementById('results').classList.contains('open') && visible(d, d.getElementById('results')), 'not visible');
+    }
+    {
+      const doc = await load('theme=console&view=audit');
+      const shown = [...doc.querySelectorAll('#title .title-small')].filter((n) => visible(doc, n)).map((n) => n.innerText.trim()).join(' ');
+      ok('replay: title screen still says offline replay', /offline replay/i.test(shown), shown);
+    }
+
     // ---------- regression: the four fixes on main ----------
     // 1. The canary is never rendered, at any event time, in either theme.
     const canaries = [...new Set(events.filter((e) => e.type === 'memo_loaded').map((e) => e.data.canary).filter(Boolean))];
