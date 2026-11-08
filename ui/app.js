@@ -35,7 +35,9 @@
   const params = new URLSearchParams(location.search);
   const TOKEN = params.get('token');
   const LIVE = !!TOKEN && params.get('replay') !== '1';
-  const FIXTURE = '/shared/fixtures/demo_events.jsonl';
+  // ?events=<name>.jsonl picks another replay file from /shared/fixtures/ (same origin only); default demo_events.
+  const EVENTS_NAME = /^[a-z0-9_-]+\.jsonl$/.test(params.get('events') || '') ? params.get('events') : 'demo_events.jsonl';
+  const FIXTURE = `/shared/fixtures/${EVENTS_NAME}`;
   const RESULTS_REAL = '/shared/results/results.json';
   const RESULTS_EXAMPLE = '/shared/fixtures/results_example.json';
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -143,7 +145,7 @@
   }
 
   // Split text into plain and matched segments. terms: [{text, label}], longest first, non-overlapping.
-  // ci = case-insensitive (used for redaction, so "PROJECT HALYARD" is hidden like "Project Halyard").
+  // ci = case-insensitive (used for redaction, so "PROJECT NAME" is hidden like "Project Name").
   function splitTerms(text, terms, ci = false) {
     const list = terms.filter((t) => t.text).sort((a, b) => b.text.length - a.text.length);
     const hay = ci ? text.toLowerCase() : text;

@@ -7,6 +7,7 @@ ephemeral loopback port, dumps the DOM with the browser in headless mode, and as
 Every non-loopback host is mapped to NOTFOUND for the browser, so the test itself cannot reach the network.
 Skipped, with a reason, when no Edge or Chrome is installed (set DT_BROWSER to a browser executable to override).
 """
+import glob
 import os
 import re
 import shutil
@@ -16,6 +17,11 @@ import threading
 import unittest
 
 from ui import preview
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Every replay file in shared/fixtures/ (demo_events.jsonl and any other scenario's *events*.jsonl).
+EVENT_FILES = sorted(os.path.basename(p) for p in glob.glob(os.path.join(ROOT, "shared", "fixtures", "*events*.jsonl"))
+                     if re.fullmatch(r"[a-z0-9_-]+\.jsonl", os.path.basename(p)))
 
 CANDIDATES = (
     os.environ.get("DT_BROWSER", ""),
@@ -66,17 +72,20 @@ class BrowserTests(unittest.TestCase):
         cls.server.server_close()
 
     def test_page_in_browser(self):
-        html = dump_dom(f"http://127.0.0.1:{self.port}/ui/tests/ui.test.html", budget_ms=600000)
-        m = re.search(r'<pre id="result">(.*?)</pre>', html, re.S)
-        self.assertIsNotNone(m, "no #result in the dumped DOM")
-        lines = [ln for ln in m.group(1).splitlines() if ln.strip()]
-        fails = [ln for ln in lines if ln.startswith("FAIL")]
-        done = [ln for ln in lines if ln.startswith("DONE")]
-        self.assertTrue(done, "harness did not finish:\n" + "\n".join(lines[-15:]))
-        self.assertEqual(fails, [], "\n".join(fails))
-        passes = [ln for ln in lines if ln.startswith("PASS")]
-        self.assertGreaterEqual(len(passes), 30, "too few checks ran:\n" + "\n".join(lines))
-
+        self.assertIn("demo_events.jsonl", EVENT_FILES)
+        for name in EVENT_FILES:
+            with self.subTest(events=name):
+                query = "" if name == "demo_events.jsonl" else f"?events={name}"
+                html = dump_dom(f"http://127.0.0.1:{self.port}/ui/tests/ui.test.html{query}", budget_ms=600000)
+                m = re.search(r'<pre id="result">(.*?)</pre>', html, re.S)
+                self.assertIsNotNone(m, "no #result in the dumped DOM")
+                lines = [ln for ln in m.group(1).splitlines() if ln.strip()]
+                fails = [ln for ln in lines if ln.startswith("FAIL")]
+                done = [ln for ln in lines if ln.startswith("DONE")]
+                self.assertTrue(done, "harness did not finish:\n" + "\n".join(lines[-15:]))
+                self.assertEqual(fails, [], "\n".join(fails))
+                passes = [ln for ln in lines if ln.startswith("PASS")]
+                self.assertGreaterEqual(len(passes), 30, "too few checks ran:\n" + "\n".join(lines))
 
 if __name__ == "__main__":
     unittest.main()
