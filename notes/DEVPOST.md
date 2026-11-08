@@ -77,6 +77,16 @@ The person who built the Gate checks did not see the file until the checks were 
 - Cost: [x] Tavily credits and [x] seconds per question.
 - Every run is reported, including runs after fixes. None were deleted. Commands to reproduce are in the README.
 
+## What testing found
+- On qwen3:8b the Planner often chose a preset that is not allowed for the action, for example an extract with the search preset "general". Its own validation rejected the action, the retry repeated the mistake, and the Planner gave up and stopped researching. A run that stops early sends fewer queries, so Doublethink's leak count would have looked better for the wrong reason.
+- We fixed it in pull request #31: a schema with one branch per action (search, extract, done), each with its own preset list; a preset outside that fixed list is corrected to the action's default; no free text from the model passes through that path.
+- We reran batch 2 after the fix. We report leaks out of the runs that actually read the poisoned page, not out of all runs:
+
+| Setup | Runs that leaked / runs that read the poisoned page |
+|---|---|
+| Two minds, no gate | [x] / [y] |
+| Doublethink (two minds plus gate) | [x] / [y] |
+
 ## Challenges we ran into
 - **Making the "before" honest.** The baseline must be a fair single agent, not a straw man. It uses the same local model, the same date and the same query rules as the Planner. A separate compromised mode always obeys the poisoned page, so the demo is predictable, and we label it as such.
 - **Numbers that lie.** A hostile internal review of the Reader, baseline and stand-in found 14 problems (1 critical, 4 high, 5 medium, 4 low), each with a failing test, all fixed. The worst: the Validator kept "$412" from a quote cut inside "$412,000,000", and "4.2%" cut out of "14.2%". Others: Unicode minus signs read as positive, one end of a range kept as the value, and an Ollama cloud model name that would have sent the memo off the machine.

@@ -24,7 +24,8 @@ search: Project Halyard, Ossory, 412 million. In a real deployment, that query g
 *Run Doublethink on the same fake pages. The Reader's documents show the planted line, highlighted.*
 Now Doublethink, same poisoned page. Two minds. The one that knows the secret runs locally and never reads the
 web. The one that reads the web runs in the cloud and never sees the secret. The Reader reads the hidden line and
-has nothing to leak, and no tools to leak it with. The Planner only ever gets numbers back. Nothing leaves.
+has nothing to leak. The Planner only gets numbers back. What leaves the device: checked queries to Tavily, public
+page text to the Reader. The memo, names, price and codename never leave.
 
 **1:10 (15 s). The answer**
 *Answer panel: each number with its quote and source link.*
