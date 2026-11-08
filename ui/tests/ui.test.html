@@ -477,6 +477,9 @@
       const shownAudit = ['main', 'outbound', 'steps'].filter((id) => visible(doc, doc.getElementById(id)))
         .concat(visible(doc, doc.querySelector('footer.bottom')) ? ['footer'] : []);
       ok('analyst: no memo panel, typed facts, gate or Outbound strip on screen', shownAudit.length === 0, shownAudit.join(', '));
+      // The step strip stays in the page (Audit view) but is hidden here: the receipt and the Verified badge replace it.
+      ok('analyst: step strip kept in the DOM but hidden', !!doc.getElementById('steps') && doc.querySelectorAll('#steps li').length === 4
+        && !visible(doc, doc.getElementById('steps')), 'step strip missing or visible');
       ok('analyst: fits 1280x720', doc.documentElement.scrollHeight <= 721 && doc.documentElement.scrollWidth <= 1281, `${doc.documentElement.scrollWidth}x${doc.documentElement.scrollHeight}`);
       const small = smallText(doc, an(doc)).concat(smallText(doc, doc.querySelector('header.top')));
       ok('analyst: every text at least 16px', small.length === 0, small.slice(0, 5).join('; '));
@@ -538,6 +541,7 @@
       ok('toggle: back to the Analyst view', !visible(doc, doc.getElementById('main')) && visible(doc, an(doc)), doc.body.className);
       doc = await load(`at=${tDone}&theme=console&view=audit`);
       ok('?view=audit opens the full screen', visible(doc, doc.getElementById('main')) && !visible(doc, an(doc)), doc.body.className);
+      ok('?view=audit shows the step strip', visible(doc, doc.getElementById('steps')), 'step strip hidden in the Audit view');
       doc = await load(`at=${tDone}&theme=1984&view=none`);
       ok('1984 theme shows the Audit view', visible(doc, doc.getElementById('main')) && !visible(doc, an(doc)), doc.body.className);
     }
