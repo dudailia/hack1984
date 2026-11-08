@@ -3,7 +3,7 @@ import json
 import sys
 
 from planner import ollama, prompt
-from planner.schema import SchemaError, validate_action, validate_typed_list
+from planner.schema import SchemaError, normalize_preset, validate_action, validate_typed_list
 
 DONE = {"action": "done"}
 ATTEMPTS = 2  # first try plus one retry
@@ -19,7 +19,13 @@ def next_action(memo, question, today, typed_results, *, chat=None) -> dict:
 
     for attempt in range(1, ATTEMPTS + 1):
         try:
-            return validate_action(json.loads(chat(messages)), known_ids=known_ids)
+            # Safety net: a wrong preset is corrected to the action's default (fixed list only) instead of
+            # failing the whole action. Every other field is still validated strictly below.
+            obj, corrected = normalize_preset(json.loads(chat(messages)))
+            if corrected:
+                # The action word and default preset are fixed values; the model's preset is never logged.
+                print(f"planner: corrected {obj['action']} preset to {obj['preset']}", file=sys.stderr)
+            return validate_action(obj, known_ids=known_ids)
         except ollama.OllamaError as e:
             reason = str(e)
         except json.JSONDecodeError:
