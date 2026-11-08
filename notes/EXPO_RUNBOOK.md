@@ -83,8 +83,15 @@ Set the browser zoom so the whole page fits; then move the terminal off screen.
 ls shared/results/results.json
 ```
 
-If it is missing, do not open the results screen (key S): the page then falls back to
-`shared/fixtures/results_example.json`, which is example data, not a measurement.
+The results screen falls back to example data if `shared/results/results.json` is missing: the page then loads
+`shared/fixtures/results_example.json`, which is not a measurement. Check the label before showing anyone. Open the
+results screen yourself (key S) with no visitor watching:
+
+- Real results: no banner, and the last line reads `from /shared/results/results.json`.
+- Example data: a banner `EXAMPLE DATA - not measured` at the top, and the last line reads
+  `from /shared/fixtures/results_example.json`. Do not show this screen to anyone. Say the numbers are not in yet.
+
+Check again after every restart of `app.run`, since the page loads the file when it opens.
 
 **1.6 One rehearsal run**
 
@@ -105,7 +112,7 @@ query** box (both Doublethink only), **Run**, **Verify proof**.
 | 5 | Tick **careless query**, keep source fake, **Run**. Untick it afterwards. | A planted careless Planner query; the row turns red with the rule that blocked it. |
 | 6 | **Verify proof** (key V opens the proof panel). | VALID with the signer key. |
 | 7 | In the proof panel, set the row number to a row you can see in the ledger, then **Tamper one byte**. | INVALID at that row. The original bundle is untouched; only a copy was changed. |
-| 8 | Optional: key S for the results screen, only if `shared/results/results.json` exists. Esc closes it. | Leaks per setup on the 40 pre-registered attacks, false blocks on 30 benign questions. |
+| 8 | Optional: key S for the results screen, only after the label check in 1.5. If the banner says `EXAMPLE DATA`, close it at once (Esc). | Leaks per setup on the 40 pre-registered attacks, false blocks on 30 benign questions. |
 | 9 | Optional, on good Wi-Fi: **Doublethink**, source **real**, **Run**. | Real Tavily results with real source links. The memo is still fictional. |
 
 Verify, Tamper and Download bundle act on the last finished run. Run is refused while a run is still going; wait
@@ -134,7 +141,8 @@ than the rehearsal. One retry at most, then replay.
 Replay keys: Space plays or pauses, Right arrow jumps to the next beat, R restarts, V proof panel, A answer, S
 results, T switches the theme. Run restarts and plays the replay; Verify and Tamper show the recorded results.
 
-**Last resort:** the backup video, on the laptop at [path] and on the USB stick.
+**Last resort:** the backup video, on the laptop at [path] and on the USB stick. The submitted demo video (3:00
+to 5:00, notes/VIDEO.md) is on YouTube at [link], if Wi-Fi works.
 
 ## 4. If the Gate refuses to start
 
