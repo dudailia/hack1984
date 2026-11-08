@@ -15,6 +15,23 @@ The screen must make three things obvious with no explanation:
 Hard rules: plain HTML, CSS and JavaScript. No framework, no CDN, no external fonts, no network.
 The page works offline. All text meets WCAG AA. Event names and fields come from shared/FORMATS.md §10 exactly.
 
+## 0. Themes (added with the console reskin)
+
+The page has two themes on the same DOM, layout, events and keys:
+- **Console (default, `styles.css`)**: a calm compliance console. Light tokens: background #F7F7F5, cards #FFFFFF,
+  border #E5E5E1, text #111827, muted #6B7280, accent indigo #4F46E5. Red only for leak or block (#DC2626 for borders
+  and icons, #B91C1C for text, on #FEF2F2), green only for allowed or verified (#059669 borders and icons, #047857
+  text, on #ECFDF5), amber #B45309 on #FFFBEB only for the planted instruction. The darker text shades keep every
+  status text at WCAG AA (5.9:1 and 5.2:1). System sans, sentence case, 16px minimum; monospace only for queries,
+  hashes and ids. Radius 10px, shadow 0 1px 2px rgba(0,0,0,.06), 4/8px spacing. Motion 160 to 220ms ease-out,
+  transform and opacity only. No eye, stamps, paper or scanlines; an incident banner at the top of the gate states
+  the leak or block in words.
+- **1984 (key T, `styles-1984.css`)**: everything below this section, unchanged. Remembered per browser;
+  `?theme=1984` forces it.
+
+Where the two themes need different words, app.js renders both (`.t-classic` and `.t-console`) and each stylesheet
+hides the other's, so T switches instantly without re-rendering.
+
 ## 1. Color
 
 ### The two meaning rules

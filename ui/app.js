@@ -1,4 +1,6 @@
 // Doublethink UI. Event names and fields: shared/FORMATS.md section 10. Design: ui/DESIGN.md.
+// Two themes share this DOM: console (styles.css, default) and 1984 (styles-1984.css, key T). Where their words
+// differ, both variants are rendered (.t-console / .t-classic) and each stylesheet hides the other's.
 // One dispatcher on env.type serves both the replay file and the live SSE stream.
 // All data goes into the DOM through textContent / text nodes, never innerHTML.
 // Motion never delays the replay: every sequence is CSS delays or fire-and-forget timers.
@@ -39,6 +41,29 @@
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const EASE = 'cubic-bezier(0.2, 0, 0, 1)';
   document.body.classList.add(LIVE ? 'live' : 'replay');
+
+  // ---------- theme (key T) ----------
+  const THEME_KEY = 'dt-theme';
+  function readTheme() {
+    const q = params.get('theme');
+    if (q === '1984' || q === 'console') return q;
+    try { return localStorage.getItem(THEME_KEY) === '1984' ? '1984' : 'console'; } catch (_) { return 'console'; }
+  }
+  let theme = readTheme();
+  function applyTheme(t) {
+    theme = t;
+    $('#css-console').disabled = t !== 'console';
+    $('#css-classic').disabled = t !== '1984';
+    document.body.classList.toggle('theme-console', t === 'console');
+    document.body.classList.toggle('theme-classic', t === '1984');
+    try { localStorage.setItem(THEME_KEY, t); } catch (_) { /* private window: the theme just isn't remembered */ }
+  }
+  applyTheme(theme);
+  const classic = () => theme === '1984';
+
+  // Both theme variants of one piece of text or nodes.
+  const dual = (c1984, cConsole) => [el('span', { class: 't-classic' }, c1984), el('span', { class: 't-console' }, cConsole)];
+  const cap = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
 
   const SINGLE_MODES = new Set(['single_agent', 'compromised']);
   const UNIT_SUFFIX = { percent: '%', multiple: 'x' };
@@ -143,7 +168,8 @@
   }
 
   function waiting(text) {
-    return el('p', { class: 'empty waiting' }, `> ${text}`, el('span', { class: 'cursor', 'aria-hidden': 'true' }));
+    return el('p', { class: 'empty waiting' },
+      dual([`> ${text}`, el('span', { class: 'cursor', 'aria-hidden': 'true' })], cap(text)));
   }
 
   // Scroll a container so that `node` is visible, without scrolling any ancestor.
@@ -202,28 +228,35 @@
     else if (s && s.source === 'fake') b.textContent = 'SOURCE: LOCAL STAND-IN (fake)';
     else b.textContent = 'SOURCE: —';
     b.title = b.textContent;
+    const pill = $('#session-pill');
+    pill.hidden = !(S.view && s);
+    if (s) fill(pill, [el('span', { class: 'mono' }, S.view), s.source ? ` · ${s.source}` : '']);
+    pill.title = s && s.source === 'real' ? 'Searches go to api.tavily.com' : s ? 'Searches go to the local stand-in' : '';
   }
 
-  function runDescription(sid) {
+  function runBits(sid) {
     const s = S.sessions[sid];
-    if (!s) return sid;
-    const bits = [sid, s.mode, s.source];
+    if (!s) return [];
+    const bits = [s.mode, s.source];
     if (s.careless) bits.push('careless query');
     if (s.done) bits.push(s.done.outcome);
-    return bits.filter(Boolean).join(' · ');
+    return bits.filter(Boolean);
   }
+  const runDescription = (sid) => [sid, ...runBits(sid)].join(' · ');
+  const runLabel = (sid) => dual(`VERIFYING RUN ${runDescription(sid)}`,
+    ['Showing run ', el('span', { class: 'mono' }, sid), runBits(sid).map((b) => ` · ${b}`).join('')]);
 
   function renderGateHead() {
     const single = S.uiMode === 'single';
     const s = S.view && S.sessions[S.view];
-    $('#gate-title').textContent = single ? 'Outbound' : 'The gate';
+    fill($('#gate-title'), single ? dual('Outbound', 'Outbound') : dual('The gate', 'Egress gate'));
     let sub = 'the only way out';
     if (single) sub = 'recorded, not enforced';
     else if (s && s.mode === 'two_minds') sub = 'recording only · not enforcing';
-    $('#gate-sub').textContent = sub;
+    fill($('#gate-sub'), dual(sub, cap(sub)));
 
     const exit = $('#exit');
-    exit.replaceChildren(el('span', { class: 'door' }, single ? 'EXIT ▲' : 'ONLY DOOR OUT ▲'));
+    exit.replaceChildren(el('span', { class: 'door' }, dual(single ? 'EXIT ▲' : 'ONLY DOOR OUT ▲', single ? 'Destinations' : 'Allowed')));
     const dests = [];
     if (s && s.source === 'real') dests.push('api.tavily.com');
     else if (s && s.source === 'fake') dests.push(S.fakeDest || '127.0.0.1 (local stand-in)');
@@ -232,8 +265,43 @@
 
     // When the ledger shows an earlier run than the latest one (the proof beats), say so loudly.
     const other = S.view && S.view !== S.current;
-    $('#run-label').textContent = other ? `VERIFYING RUN ${runDescription(S.view)}` : '';
+    fill($('#run-label'), other ? runLabel(S.view) : []);
     $('#ledger-session').textContent = S.view && !other ? `ledger ${S.view}${s && s.mode ? ` · ${s.mode}` : ''}` : '';
+  }
+
+  // ---------- incident banner (console theme) ----------
+  const andList = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+
+  function incidentFor(sid) {
+    const s = sid && S.sessions[sid];
+    if (!s) return null;
+    const bad = s.rows.filter((e) => ['blocked', 'leak'].includes(rowKind(e.row)));
+    if (!bad.length) return null;
+    const e = bad[0];
+    const row = e.row;
+    const d = e.display || {};
+    const more = bad.length > 1 ? ` (+${bad.length - 1} more)` : '';
+    if (rowKind(row) === 'blocked') {
+      const detail = (e.blockedInfo && e.blockedInfo.detail) || d.detail;
+      return { kind: 'blocked', title: ['Blocked by policy ', el('span', { class: 'mono' }, row.rule || 'gate'), more],
+        sub: `${detail ? `${cap(detail)}. ` : ''}Nothing was sent to ${row.destination}.` };
+    }
+    const labels = [...new Set(splitTerms(d.query || '', s.secrets).filter((g) => g.term).map((g) => g.term.label))];
+    const where = row.component === 'reader' ? 'the reader model' : 'the search provider';
+    const what = labels.length ? andList(labels) : row.rule;
+    return { kind: 'leak', title: `Leak: ${what} sent to ${where}${more}`,
+      sub: ['Rule ', el('span', { class: 'mono' }, row.rule), ` matched, but nothing enforced it. The request went to ${row.destination}.`] };
+  }
+
+  function renderIncident(sid, animate) {
+    if (sid !== S.view) return;
+    const box = $('#incident');
+    const inc = incidentFor(sid);
+    box.hidden = !inc;
+    if (!inc) { box.replaceChildren(); return; }
+    box.className = `incident t-console ${inc.kind}${animate ? ' enter' : ''}`;
+    fill(box, [el('span', { class: 'incident-icon', 'aria-hidden': 'true' }, inc.kind === 'leak' ? '!' : '✕'),
+      el('div', null, el('p', { class: 'incident-title' }, inc.title), el('p', { class: 'incident-sub' }, inc.sub))]);
   }
 
   // ---------- big counters (M11) ----------
@@ -287,6 +355,7 @@
     renderCounters(sid, animate);
     renderBadge();
     renderGateHead();
+    renderIncident(sid, false);
     // The Planner room follows the same run: its dossier and its typed facts (proof beats included).
     if (sid && S.sessions[sid] && S.sessions[sid].memo) renderMemo(sid);
     renderTyped(sid);
@@ -311,9 +380,13 @@
     const s = session(sid);
     const subject = s.title || '—';
     return el('article', { class: 'paper', 'aria-label': 'Confidential memo' },
-      el('p', { class: 'tw' }, 'FILE 1984', s.sha ? `  ·  SHA ${shortHash(s.sha)}` : ''),
-      el('p', { class: 'tw' }, 'SUBJECT: ', redact ? redacted(subject, sid) : subject),
-      el('div', { class: 'stamp-row' }, el('span', { class: 'confidential' }, 'CONFIDENTIAL')),
+      el('p', { class: 'tw t-classic' }, 'FILE 1984', s.sha ? `  ·  SHA ${shortHash(s.sha)}` : ''),
+      el('p', { class: 'tw t-classic' }, 'SUBJECT: ', redact ? redacted(subject, sid) : subject),
+      el('div', { class: 'stamp-row t-classic' }, el('span', { class: 'confidential' }, 'CONFIDENTIAL')),
+      el('div', { class: 'doc-head t-console' },
+        el('p', { class: 'doc-name' }, 'Deal memo'),
+        el('p', { class: 'doc-meta', title: redact ? 'Hover a bar to see what kind of secret it hides' : '' }, redact ? 'Redacted on screen' : 'Shown in full',
+          s.sha ? [' · sha ', el('span', { class: 'mono', title: s.sha }, shortHash(s.sha))] : '')),
       el('div', { class: 'memo' }, redact ? redacted(s.memo, sid) : s.memo));
   }
 
@@ -326,7 +399,8 @@
   // ---------- typed facts: what the Planner receives, as receipt chips ----------
   function typedNode(d, animate) {
     return el('li', { class: animate ? 'fade' : '' },
-      el('div', { class: 'tneed' }, `${d.need} · ${d.found ? 'found' : 'not found'}`),
+      el('div', { class: 'tneed' }, dual(`${d.need} · ${d.found ? 'found' : 'not found'}`,
+        [el('span', { class: 'mono' }, d.need), el('span', { class: 'ichip' }, d.found ? 'Found' : 'Not found')])),
       el('div', { class: 'chips' }, (d.values || []).map((v) => el('div', { class: 'chip' },
         el('div', { class: 'chip-top' }, el('span', { class: 'chip-num' }, String(v.value)), el('span', { class: 'chip-unit' }, v.unit)),
         el('div', { class: 'chip-foot' }, `${v.period || '—'} · ${v.result_id}`)))));
@@ -383,33 +457,41 @@
       if (kind === 'blocked') li.classList.add('blocked');
       if (kind === 'leak') li.classList.add('leak');
       const mark = kind === 'blocked'
-        ? el('span', { class: 'mark bad' }, '✕ BLOCKED')
-        : kind === 'leak' ? el('span', { class: 'mark bad' }, '✕ LEAKED') : el('span', { class: 'mark ok', 'aria-label': 'allowed' }, '✓');
+        ? el('span', { class: 'mark bad t-classic' }, '✕ BLOCKED')
+        : kind === 'leak' ? el('span', { class: 'mark bad t-classic' }, '✕ LEAKED') : el('span', { class: 'mark ok t-classic', 'aria-label': 'allowed' }, '✓');
+      const status = { blocked: 'Blocked', leak: 'Leaked' }[kind] || 'Allowed';
       li.append(el('div', { class: 'line1' },
         el('span', { class: 'pslot', 'aria-hidden': 'true' }),
-        el('span', { class: 'seq' }, pad2(row.seq)),
-        el('span', { class: 'kind' }, row.kind),
-        el('span', { class: 'dest', title: row.destination }, shortDest(row.destination)),
-        mark));
+        el('span', { class: 'seq t-classic' }, pad2(row.seq)),
+        el('span', { class: 'time t-console', title: row.time || '' }, (row.time || '').slice(11, 19)),
+        el('span', { class: 'kind t-classic' }, row.kind),
+        el('span', { class: `ichip agent t-console ${row.component || ''}` }, cap(row.component || row.kind || '')),
+        el('span', { class: 'dest', title: row.destination }, dual(shortDest(row.destination), row.destination)),
+        mark,
+        el('span', { class: `status t-console ${kind === 'leak' || kind === 'blocked' ? kind : 'allowed'}` }, status)));
       const d = display || {};
       if (d.query) {
         const n = [...d.query].length;
-        const q = el('div', { class: `q indent${animate ? ' typing' : ''}` }, '"', el('span', null, typedQuery(d.query, sid, animate, kind === 'leak')), '"');
+        const q = el('div', { class: `q query indent${animate ? ' typing' : ''}` },
+          el('span', { class: 't-classic' }, '"'), el('span', null, typedQuery(d.query, sid, animate, kind === 'leak')), el('span', { class: 't-classic' }, '"'));
         if (animate) q.style.setProperty('--step', `${Math.min(25, T.typeMax / Math.max(1, n)).toFixed(2)}ms`);
         li.append(q);
-      } else if (d.summary || d.label) li.append(el('div', { class: 'q indent' }, d.summary || d.label));
+      } else if (d.summary || d.label) li.append(el('div', { class: 'q summary indent' }, dual(d.summary || d.label, cap(d.summary || d.label))));
       const detail = (entry.blockedInfo && entry.blockedInfo.detail) || d.detail;
       if (row.rule && kind === 'noted') {
         // Allowed, and a non-leak rule fired (shape.*, gate.*): recorded, never red, never counted.
-        li.append(el('div', { class: 'rule noted indent' }, `rule ${row.rule} · recorded, not a leak`,
-          detail ? el('span', { class: 'detail' }, ` · ${detail}`) : null));
+        li.append(el('div', { class: 'rule noted indent' },
+          dual([`rule ${row.rule} · recorded, not a leak`, detail ? el('span', { class: 'detail' }, ` · ${detail}`) : null],
+            [el('span', { class: 'ichip rule-chip mono' }, row.rule), el('span', { class: 'detail' }, `Recorded, not a leak${detail ? ` · ${detail}` : ''}`)])));
       } else if (row.rule) {
-        li.append(el('div', { class: 'rule indent' }, `rule ${row.rule}`, detail ? el('span', { class: 'detail' }, ` · ${detail}`) : null));
+        li.append(el('div', { class: 'rule indent' },
+          dual([`rule ${row.rule}`, detail ? el('span', { class: 'detail' }, ` · ${detail}`) : null],
+            [el('span', { class: 'ichip rule-chip mono' }, row.rule), detail ? el('span', { class: 'detail' }, cap(detail)) : null])));
       }
-      if (kind === 'blocked' || kind === 'leak') li.append(el('div', { class: 'indent' }, el('span', { class: 'stamp' }, kind === 'blocked' ? 'BLOCKED' : 'LEAKED')));
+      if (kind === 'blocked' || kind === 'leak') li.append(el('div', { class: 'indent t-classic' }, el('span', { class: 'stamp' }, kind === 'blocked' ? 'BLOCKED' : 'LEAKED')));
       if (entry.blockedInfo && entry.blockedInfo.planted) li.append(plantedTag());
-      // Receipt footer: the hash, the bytes and the time, under a tear line.
-      li.append(el('div', { class: 'slip-foot' },
+      // Receipt footer (1984 theme): the hash, the bytes and the time, under a tear line.
+      li.append(el('div', { class: 'slip-foot t-classic' },
         el('span', { class: 'hash', title: row.hash }, `#${shortHash(row.hash)}`),
         el('span', null, `${row.bytes != null ? `${row.bytes} B · ` : ''}${(row.time || '').slice(11, 19)}`)));
     } else {
@@ -417,14 +499,14 @@
       if (row.credits_used != null) bits.push(`${row.credits_used} credit${row.credits_used === 1 ? '' : 's'}`);
       li.append(el('div', { class: 'line1' },
         el('span', { class: 'pslot', 'aria-hidden': 'true' }),
-        el('span', { class: 'seq' }, pad2(row.seq)),
-        el('span', { class: 'dest' }, `↳ ${bits.filter(Boolean).join(' · ')}`),
-        el('span', { class: 'hash', title: row.hash }, shortHash(row.hash))));
+        el('span', { class: 'seq t-classic' }, pad2(row.seq)),
+        el('span', { class: 'dest' }, dual(`↳ ${bits.filter(Boolean).join(' · ')}`, `↳ Response ${bits.filter(Boolean).join(' · ')}`)),
+        el('span', { class: 'hash', title: row.hash }, dual(shortHash(row.hash), ['row ', pad2(row.seq), ' · ', el('span', { class: 'mono' }, shortHash(row.hash))]))));
     }
     return li;
   }
 
-  const plantedTag = () => el('div', { class: 'indent' }, el('span', { class: 'tag' }, 'planted test query'));
+  const plantedTag = () => el('div', { class: 'indent' }, el('span', { class: 'tag' }, dual('planted test query', 'Planted test query')));
 
   function scrollLedger() {
     const sc = $('#ledger-scroll');
@@ -526,18 +608,22 @@
   function docNode(doc, animate) {
     const hl = doc.highlights || [];
     const { host, path } = splitUrl(doc.url);
-    return el('article', { class: `browser${animate ? ' fade' : ''}`, 'aria-label': `Web page ${doc.result_id}` },
+    return el('article', { class: `browser${hl.length ? ' has-planted' : ''}${animate ? ' fade' : ''}`, 'aria-label': `Web page ${doc.result_id}` },
       el('div', { class: 'tabbar' },
         el('span', { class: 'tab', title: doc.title }, `${doc.result_id} · ${doc.title}`)),
       el('div', { class: 'addr' },
-        el('span', { class: 'nav', 'aria-hidden': 'true' }, '‹ › ↻'),
+        el('span', { class: 'dots t-console', 'aria-hidden': 'true' }, el('i'), el('i'), el('i')),
+        el('span', { class: 'nav t-classic', 'aria-hidden': 'true' }, '‹ › ↻'),
         el('span', { class: 'field', title: doc.url }, el('b', null, host), path)),
       el('div', { class: 'page' },
-        el('div', { class: 'doc-title' }, doc.title),
+        el('div', { class: 'doc-title' }, doc.title, el('span', { class: 'mono rid t-console' }, ` ${doc.result_id}`)),
         // Excerpts can be up to 2,000 characters (FORMATS §3): they scroll inside the window.
         el('p', { class: 'doc-excerpt', tabindex: '0', role: 'region', 'aria-label': `Text of ${doc.result_id}` },
           excerptNodes(doc.excerpt || '', hl)),
-        hl.map((h) => el('p', { class: `planted-label${animate ? ' fade-late' : ''}` }, `▲ ${h.label}`))));
+        hl.map((h) => el('p', { class: `planted-label${animate ? ' fade-late' : ''}` },
+          dual(`▲ ${h.label}`, [el('span', { class: 'planted-icon', 'aria-hidden': 'true' }, '!'),
+            el('span', null, el('span', { class: 'planted-title' }, 'Hidden instruction in page'),
+              el('span', { class: 'planted-note' }, 'Planted for this demo. The reader holds no secret to send.'))])))));
   }
 
   function jobNode(d, animate) {
@@ -551,7 +637,8 @@
         const c = job.classList.toggle('collapsed');
         head.setAttribute('aria-expanded', String(!c));
       },
-    }, `${d.job || 'web'} · query `, el('span', { class: 'pq' }, `"${d.public_query}"`),
+    }, dual(`${d.job || 'web'} · query `, [el('span', { class: 'ichip mono' }, d.job || 'web'), ' Search ']),
+    el('span', { class: 'pq' }, dual(`"${d.public_query}"`, d.public_query)),
     el('span', { class: 'job-summary' }, ` · ${(d.docs || []).length} documents read`));
     job.append(head, body);
     return job;
@@ -576,19 +663,32 @@
   }
 
   function renderProofStatic(sid) {
-    $('#proof-session').textContent = sid ? `session ${sid}` : 'no session yet';
-    $('#proof-run').textContent = sid ? `VERIFYING RUN ${runDescription(sid)}` : '';
+    fill($('#proof-session'), sid ? dual(`session ${sid}`, ['Session ', el('span', { class: 'mono' }, sid)]) : dual('no session yet', 'No session yet'));
+    fill($('#proof-run'), sid ? runLabel(sid) : []);
     $('#proof-cmd').textContent = `python3 proof/verify.py bundles/${sid || '<session_id>'}.json`;
   }
 
   function showVerdict(d, animate) {
     const slot = $('#verdict');
+    const fp = typeof d.signer_key_sha256 === 'string' && /^[0-9a-f]{64}$/.test(d.signer_key_sha256) ? d.signer_key_sha256 : null;
+    const reason = d.reason ? cap(String(d.reason).replace(/_/g, ' ')) : 'Chain broken';
     if (d.valid) {
-      fill(slot, [el('div', { class: `verdict valid${animate ? ' fade' : ''}` }, 'VALID'),
-        el('p', { class: 'verdict-why' }, `${d.rows_checked} rows checked`)]);
+      fill(slot, [
+        el('div', { class: 't-classic' }, el('div', { class: `verdict valid${animate ? ' fade' : ''}` }, 'VALID'),
+          el('p', { class: 'verdict-why' }, `${d.rows_checked} rows checked`)),
+        el('div', { class: `banner-ok t-console${animate ? ' pop' : ''}`, role: 'status' },
+          el('span', { class: 'b-icon', 'aria-hidden': 'true' }, '✓'),
+          el('div', null, el('p', { class: 'b-title' }, `Verified · ${d.rows_checked} rows`,
+            fp ? [' · signer ', el('span', { class: 'mono', title: fp }, fp.slice(0, 16))] : ''),
+          el('p', { class: 'b-sub' }, 'Every row hashes into the next and the chain ends at the bundle head.')))]);
     } else {
-      fill(slot, [el('div', { class: `verdict invalid${animate ? ' fade' : ''}` }, 'INVALID'),
-        el('p', { class: 'verdict-why bad' }, `row ${d.broken_at_seq} · ${d.reason}`)]);
+      fill(slot, [
+        el('div', { class: 't-classic' }, el('div', { class: `verdict invalid${animate ? ' fade' : ''}` }, 'INVALID'),
+          el('p', { class: 'verdict-why bad' }, `row ${d.broken_at_seq} · ${d.reason}`)),
+        el('div', { class: `banner-bad t-console${animate ? ' pop' : ''}`, role: 'alert' },
+          el('span', { class: 'b-icon', 'aria-hidden': 'true' }, '✕'),
+          el('div', null, el('p', { class: 'b-title' }, `Integrity check failed at row ${d.broken_at_seq}`),
+            el('p', { class: 'b-sub' }, `${reason}. Row ${d.broken_at_seq} and every row after it no longer match the chain.`)))]);
     }
   }
 
@@ -600,7 +700,8 @@
     rows.forEach((li) => {
       li.classList.remove('p-ok', 'broken', 'tampered');
       li.querySelector('.pslot').textContent = '';
-      li.querySelectorAll('.tampered-tag').forEach((t) => t.parentNode.remove());
+      li.querySelectorAll('.tampered-tag').forEach((t) => t.closest('.indent').remove());
+      li.querySelectorAll('.broken-badge').forEach((t) => t.remove());
     });
     fill($('#verdict'), waiting('checking the chain'));
 
@@ -617,9 +718,10 @@
     const markBad = (li) => {
       li.classList.add('broken');
       li.querySelector('.pslot').textContent = '✕';
+      li.querySelector('.line1').append(el('span', { class: 'status broken-badge t-console' }, 'Broken'));
       if (d.tampered && Number(li.dataset.seq) === d.tampered_seq) {
         li.classList.add('tampered');
-        li.insertBefore(el('div', { class: 'indent' }, el('span', { class: 'tag tampered-tag' }, '1 byte edited')),
+        li.insertBefore(el('div', { class: 'indent' }, el('span', { class: 'tag tampered-tag' }, dual('1 byte edited', 'One byte edited'))),
           li.querySelector('.slip-foot'));
       }
     };
@@ -631,7 +733,7 @@
       showVerdict(d, false);
       return;
     }
-    const step = good.length ? Math.min(80, 1200 / good.length) : 0;
+    const step = good.length ? Math.min(classic() ? 80 : 40, 1200 / good.length) : 0;
     good.forEach((li, i) => walkTimers.push(setTimeout(() => { markGood(li); scrollWithin(sc, li); }, i * step)));
     let t = good.length * step;
     const badStep = bad.length ? Math.min(40, 600 / bad.length) : 0;
@@ -840,11 +942,12 @@
         if (animate) {
           later(flashExit, 0);
           later(() => renderCounters(sid, true), T.blockStamp);
-        } else renderCounters(sid, false);
+          later(() => renderIncident(sid, true), T.blockRed);
+        } else { renderCounters(sid, false); renderIncident(sid, false); }
       } else if (kind === 'leak') {
         if (animate) {
-          later(() => { renderCounters(sid, true); setEye(true, true); }, T.leakStamp);
-        } else { renderCounters(sid, false); setEye(true, true); }
+          later(() => { renderCounters(sid, true); setEye(true, true); renderIncident(sid, true); }, T.leakStamp);
+        } else { renderCounters(sid, false); setEye(true, true); renderIncident(sid, false); }
       } else renderCounters(sid, animate);
     },
 
@@ -859,10 +962,12 @@
       const li = document.querySelector(`#ledger li.attempt[data-seq="${env.data.ledger_seq}"]`);
       if (!li) return;
       if (env.data.detail && !li.querySelector('.rule .detail')) {
-        const r = li.querySelector('.rule');
-        if (r) r.append(el('span', { class: 'detail' }, ` · ${env.data.detail}`));
+        const [c1984, cConsole] = li.querySelectorAll('.rule > span');
+        if (c1984) c1984.append(el('span', { class: 'detail' }, ` · ${env.data.detail}`));
+        if (cConsole) cConsole.append(el('span', { class: 'detail' }, cap(env.data.detail)));
       }
       if (env.data.planted && !li.querySelector('.tag')) li.insertBefore(plantedTag(), li.querySelector('.slip-foot'));
+      renderIncident(sid, false);
       if (o && o.instant) scrollLedger();
     },
 
@@ -968,7 +1073,7 @@
     const end = R.i >= R.events.length && R.events.length > 0;
     const icon = end ? '■' : R.playing ? '▶' : '❚❚';
     const st = $('#replay-status');
-    st.textContent = `REPLAY ${icon} ${fmtClock(replayNow())}`;
+    st.textContent = `Replay ${icon} ${fmtClock(replayNow())}`;
     st.title = S.beat ? `${S.beat.at} ${S.beat.title}` : '';
   }
 
@@ -1195,6 +1300,7 @@
       case 'v': toggleProof(); break;
       case 'a': toggleSheet(); break;
       case 's': toggleResults(); break;
+      case 't': applyTheme(classic() ? 'console' : '1984'); toast(classic() ? 'Theme: 1984. Press T for the console theme.' : 'Theme: console. Press T for the 1984 theme.'); break;
       default: return;
     }
   });
