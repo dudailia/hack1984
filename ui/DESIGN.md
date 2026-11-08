@@ -32,6 +32,59 @@ The page has two themes on the same DOM, layout, events and keys:
 Where the two themes need different words, app.js renders both (`.t-classic` and `.t-console`) and each stylesheet
 hides the other's, so T switches instantly without re-rendering.
 
+## 0b. Outbound panel (console theme)
+
+A compact strip between the rooms and the footer. It answers, from the events alone, what left this device during the
+run on screen.
+
+- **Data:** only `ledger_row` attempt rows and `blocked` events (FORMATS §7, §10). No event schema change:
+
+  | Panel needs | Field |
+  |---|---|
+  | Time | `row.time` (HH:MM:SS) |
+  | Destination | `row.destination` |
+  | Kind | `row.kind` |
+  | Decision | `row.decision` (`allowed` shown as Sent) |
+  | Rule | `row.rule` |
+  | Detail | `blocked.detail` or `display.detail` |
+
+  Queries are never shown in the panel. Neither are the memo, the canary or any secret value.
+- **Logic:** `ui/outbound.js` holds pure functions with no DOM, loaded before app.js and tested on their own.
+  `summarize(rows)` returns one item per attempt, the sent attempts grouped by (kind, host), and the blocked attempts.
+  `summaryText()` and `check()` build the two lines. Every count, host, rule and detail comes from the rows.
+- **Table:** one row per outbound attempt.
+  - Columns: time, destination, kind, decision (Sent / Blocked), and rule (`—` when none).
+  - Kind labels follow the data's three kinds: `search` is "search", `extract` is "page read" and `reader` is
+    "reading job".
+  - A blocked row, or a sent row whose rule is a confirmed-secret or canary rule, is red. Other sent rows are green
+    (allowed).
+  - The table scrolls inside the strip, and the newest row is always in view.
+- **Summary line**, in this form: `Left this device: 2 search queries to api.tavily.com, 2 reading jobs to
+  api.anthropic.com. Blocked: 0.`
+  - **Loopback honesty rule:** a destination on 127.0.0.1, localhost or ::1 is the local Tavily stand-in. It plays
+    the web in the demo, but it never leaves the device, so it gets its own clause: `Sent to the local stand-in for the
+    web (stayed on this device): 2 search queries to 127.0.0.1:8702.` The single-agent leak therefore never reads as
+    "nothing left" next to a "yes" secret line.
+  - With no attempts: `Nothing has left this device yet.` With attempts but all blocked: `Nothing left this device.`
+- **Check line,** from the Gate's check results (the `rule` on each attempt), never from matching strings in the page.
+  - It answers whether a confirmed secret (`secret.*`) or the canary (`canary`) was in a **sent** request.
+  - Yes: `Confirmed secret or canary in a sent request: yes, in 1 of 2 sent requests. Row 03 to 127.0.0.1:8702:
+    matches a confirmed secret (codename) (secret.codename).` The detail and the rule are the Gate's own strings.
+  - No: `…: no, 0 of 4 sent requests matched.` or `…: no, nothing was sent.`
+  - Notes are added after the verdict in neutral text: `Blocked before sending: 1 (secret.buyer).` and the
+    provenance check (`provenance.*`, a rare memo term, which is not a confirmed secret).
+  - Only the verdict is coloured: red for yes, green for no.
+  - With the fixture: **yes** in the single agent (compromised) run, **no** in both Doublethink runs, and **no** with
+    one block in the careless run.
+- **Timing:** the panel updates on every attempt. For a leak or a block, it changes at the same moment as the
+  counters and the red row (`T.leakStamp` and `T.blockStamp`), so it never gives the moment away early. It follows
+  `S.view`, so during the proof beats it shows the verified run like the ledger, answer bar and counters.
+- **Layout at 1280x720:**
+  - The strip is 9.75rem tall, a full-width card in grid row 3; the footer moves to row 4 and the results screen
+    covers rows 2 to 4.
+  - Text is 16px, with monospace for times and hosts.
+  - The 1984 theme hides the strip (`.t-console`) and keeps its own layout.
+
 ## 1. Color
 
 ### The two meaning rules
@@ -462,15 +515,31 @@ All motion uses `--ease`. Durations at or under 250ms, except the sequences abov
 
 ## 7. Results screen (`beat.data.screen = "results"`, or key S)
 
-- It replaces the whole main area.
-- All numbers come from `/shared/results/results.json`. Until that file exists, they come from
-  `/shared/fixtures/results_example.json`, with its banner. **No number is typed into the code.**
+- It replaces the whole main area, including the Outbound strip and the footer.
+- **Measured numbers come only from `/shared/results/results.json`. No number is typed into the code.**
   - app/run.py serves `/shared/results/` (FORMATS §11, confirmed by Ilia), and so does `ui/preview.py`.
+- **No silent example data (Ilia's must-fix).** The page never falls back to `results_example.json` on its own.
+
+  | Situation | What the screen shows |
+  |---|---|
+  | `results.json` missing (404) | **"No measured results yet"**: the path that is missing, that numbers appear once the red-team run writes it, and how to preview with `?example=1`. No numbers, no bars, and the example file is not even fetched. |
+  | `results.json` unreadable (HTTP error, bad JSON, no runs) | The same "No measured results yet" state, with the error. |
+  | `results.json` marked `"example": true` | The same state ("marked as example data, so it is not shown as a measurement"). Example data cannot enter through the real path either. |
+  | `results.json` present and not marked as example | The measured screen below. |
+  | URL has **`?example=1`** | Only the example file is loaded (the real one is not used). A large **"EXAMPLE DATA, not measured"** banner sits at the top (--fs-3, dashed outline), naming the file and the parameter. **Every number** carries the same label right next to it (18px bold, dashed outline): the attack total, each bar value, false blocks, answered-with-a-cited-number and both cost figures. |
+
+  The label uses neutral ink (`--text`) with a dashed border, never red, green or amber, which keep their meanings.
+  Both themes follow these rules.
+- Tests (`ui/tests/ui.test.html`, run by `test_ui_browser`), in both themes:
+  - with `results.json` missing, the screen says "No measured results yet", shows no numbers or bars, shows no example
+    label, and the page makes no request for `results_example.json`;
+  - with `?example=1`, the banner is at least 24px, every `[data-num]` value carries the label at 18px or more, and
+    exactly one example fetch is made.
+  - If a checkout already has `results.json`, the missing-file case reports SKIP, and the test instead checks that the
+    example file is not fetched without `?example=1`.
 - FORMATS §9 still has one judgement per run (`leak_judge`, a single description). If it ever stores several
   (for example the frozen detector plus a fallback), the screen shows the frozen-detector judgement and labels any
   fallback clearly.
-- When `example` is true, a full-width banner shows the `banner` text in off-white on black with a 4px off-white
-  border. It is not red.
 - Title: `{attacks_total} attacks, written and hashed before the code.` `attack_file_sha256` is shown short below
   the title.
 - There are four horizontal bars from `runs[i].modes`, one row each, with the label at --fs-4, the bar, and the value
@@ -492,9 +561,24 @@ All motion uses `--ease`. Durations at or under 250ms, except the sequences abov
   - `label`, `commit`, `planner_model`, `source`
   - `answered with a cited number {usefulness.answered_with_cited_number} / {usefulness.total}`
   - `cost.tavily_credits_per_question` and `cost.seconds_per_question`, shown as `not measured` when null.
-- Run shown: the last entry in `runs`, which is the latest. `runs[0]` is the frozen run (FORMATS §9: "the frozen run
-  first"). If there is more than one run, a thin --text tick marks the `runs[0]` value on each bar, with the caption
-  `| = {runs[0].label} run`.
+- **Which run each number comes from is decided by the data, never by position** (`ui/results.js`, Ilia's check
+  on PR #39). `runs` keeps every run in time order and never deletes one, and runs differ in how they were judged:
+  1. A run whose `leak_judge` (or, as in the real file, `judge`) text says FALLBACK is **never shown**.
+  2. A run counts as scored by the frozen detector only if `detector.matches_checks_frozen` is true.
+  3. For each mode, the screen uses the **most recent** run that passes 1 and 2 and has that mode. False blocks,
+     usefulness and cost are chosen the same way. With none, the screen says "not measured".
+  4. Under the bars, "Where each number comes from" names each source run: `run N of M`, its label and its commit.
+     The label alone is not unique: the real file has two runs labelled "checks-frozen". Excluded runs are listed as
+     "Not shown: run N of M (scored with the fallback judge)", with no numbers.
+
+  With the real file (PR #38: three runs), single agent and compromised come from run 2 ("checks-frozen
+  rejudged-frozen"), and two minds and two minds + gate from run 3 (batch 2, commit c303c1c). Run 1 (fallback judge,
+  single agent 1/40) is never shown. The old tick marks for `runs[0]` are gone, because they showed the fallback run.
+  - With `?example=1` the example file has no judge or detector fields. Its runs are accepted unless they say
+    FALLBACK, and every number carries the example label.
+  - Test: `ui/tests/fixtures/results_three_runs.json` is shaped like the real file. Its fallback run carries
+    distinctive numbers, and the harness checks that none of them appear, that each mode comes from the right run,
+    and that a FALLBACK `leak_judge` or a missing detector flag also excludes a run.
 - No bar animation. The numbers are the point.
 
 ## 8. Interaction and accessibility
@@ -519,8 +603,32 @@ All motion uses `--ease`. Durations at or under 250ms, except the sequences abov
 
 ## 9. Data sources, files and preview
 
-- Files are `ui/index.html`, `ui/styles.css` and `ui/app.js`, plus `ui/preview.py` and its tests in `ui/tests/`.
-  `ui/fonts/` is added only with approval.
+- Files are `ui/index.html`, `ui/styles.css`, `ui/styles-1984.css`, `ui/outbound.js` and `ui/app.js`, plus
+  `ui/preview.py`, `ui/check_network.py` and the tests in `ui/tests/`. `ui/fonts/` is added only with approval.
+- **Nothing external.** The page loads only its own files from its origin:
+  - no web fonts (system font stacks only), no CDN scripts, no icon sets and no analytics;
+  - the favicon is an inline `data:` URI, so the browser does not request `/favicon.ico`.
+
+  Proven three ways:
+  1. `ui/tests/test_static.py` scans the page files for external URLs and `@import`. The SVG namespace string is the
+     only allowed `http` text.
+  2. `python ui/check_network.py` plays the **full replay** in both themes in headless Edge, served by preview.py. It
+     records the browser's net log and the page's Resource Timing, and writes `ui/evidence/network-replay.md`.
+     - The check fails if the page requests, loads or connects to anything but 127.0.0.1.
+     - During the run, every non-loopback host is mapped to NOTFOUND, so nothing can leave even if something tried.
+     - Edge's own background attempts (autofill, network time) are listed openly, separately from the page, with
+       their outcome.
+  3. `ui/tests/test_network.py` runs the same check into a temp file on every test run.
+- **Tests** (`python -m unittest discover -s ui/tests -t .`, standard library only):
+  - `test_preview` and `test_static`.
+  - `test_ui_browser`: headless Edge or Chrome runs `ui/tests/ui.test.html`, which covers:
+    - the Outbound logic and the panel in the page;
+    - the four fixes on main: the canary is never in the DOM at any of the fixture's event times, in both themes; a
+      run's memo never appears before its `parties_confirmed`; tampered rows show only the failure; reader job counts
+      come from `docs_read` and typed facts appear once.
+  - `test_network`.
+
+  The browser tests skip with a reason when no browser is found (`DT_BROWSER` overrides the path).
 - Replay reads `shared/fixtures/demo_events.jsonl` (one FORMATS §10 envelope per line) and waits on `t_ms`.
 - Live reads `GET /events?token=…` (SSE, no `event:` line). Replay and live share one dispatcher keyed on `type`.
 - Paths are relative to the one origin: the page is at `/ui/index.html` and the fixtures are read from
@@ -556,6 +664,7 @@ All motion uses `--ease`. Durations at or under 250ms, except the sequences abov
   | `?play=1` | starts playing |
   | `?title=0` | skips the title screen |
   | `?open=answer` | opens the answer sheet |
+  | `?example=1` | the results screen shows `shared/fixtures/results_example.json`, with "EXAMPLE DATA, not measured" on every number. Without it, example data never appears. |
   | `?freeze=<ms>` | with `?at=`, plays the next 100ms of events with animation, then pauses every animation at `<ms>`, so a frame of a moment can be screenshotted (for example `?at=86500&freeze=450` for the block, `?at=20990&freeze=900` for the leak) |
 
 ## 10. Items not in shared/FORMATS.md
@@ -566,7 +675,7 @@ None.
 ### Resolved
 | # | Item | Resolution | Source |
 |---|---|---|---|
-| 2 | How the page reads `shared/results/results.json` | app/run.py serves `/shared/results/…` statically (FORMATS §11). The page reads `/shared/results/results.json` and falls back to the example file. | Ilia confirmed |
+| 2 | How the page reads `shared/results/results.json` | app/run.py serves `/shared/results/…` statically (FORMATS §11). The page reads `/shared/results/results.json` only. If it is missing it shows "No measured results yet" (section 7). The example file loads only with `?example=1`, and then every number is labelled. | Ilia confirmed; no-fallback rule is Ilia's must-fix |
 | 1 | The token in the UI URL | `?token=` in the page URL. The page sends it as `?token=` on `/events` and `/api/bundle`, and as the `X-DT-Token` header on `/api/*` POSTs. | Aayush confirmed |
 | 3 | The mode for the Single agent toggle | `compromised` (with `source: "fake"`) | notes/DEMO.md |
 | 4 | The body Run sends | `POST /api/run {"mode", "source": "real"\|"fake", "plant_careless": true\|false}`. The source selector next to Run sets `source`, and a "careless query" switch sets `plant_careless`. Single agent forces `fake`. | Aayush |
