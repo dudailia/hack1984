@@ -93,7 +93,7 @@
   function session(sid) {
     if (!S.sessions[sid]) {
       S.sessions[sid] = {
-        rows: [], typed: [], secrets: [], canary: null, mode: null, source: null, careless: false,
+        rows: [], typed: [], typedKeys: new Set(), urls: {}, secrets: [], canary: null, mode: null, source: null, careless: false,
         memo: '', title: '', sha: '', answer: null, done: null,
         m: { leaks: 0, blocked: 0, credits: 0, seconds: null },
       };
@@ -881,7 +881,7 @@
       const d = env.data;
       const sid = env.session_id;
       const s = session(sid);
-      Object.assign(s, { rows: [], typed: [], mode: d.mode, source: d.source, careless: !!d.plant_careless, answer: null, done: null,
+      Object.assign(s, { rows: [], typed: [], typedKeys: new Set(), urls: {}, mode: d.mode, source: d.source, careless: !!d.plant_careless, answer: null, done: null,
         m: { leaks: 0, blocked: 0, credits: 0, seconds: null } });
       S.current = sid;
       S.fakeDest = null;
@@ -972,6 +972,9 @@
     },
 
     docs_read(env, o) {
+      // result_id -> url for this session (FORMATS §4: ids are per session), used to dedupe typed facts.
+      const urls = session(env.session_id).urls;
+      for (const doc of env.data.docs || []) urls[doc.result_id] = doc.url;
       if (env.session_id !== S.current) return;
       const d = env.data;
       const target = d.by === 'baseline' ? $('#agent-web') : $('#reader-body');
@@ -1005,6 +1008,18 @@
 
     planner_typed(env, o) {
       const s = session(env.session_id);
+      // A need asked twice repeats its facts, sometimes under a new result id for the same page.
+      // Keep each (need, value, unit, period, source url) once per run; there is no fact id.
+      const fresh = (env.data.values || []).filter((v) => {
+        const k = JSON.stringify([env.data.need, v.value, v.unit, v.period, s.urls[v.result_id] || v.result_id]);
+        if (s.typedKeys.has(k)) return false;
+        s.typedKeys.add(k);
+        return true;
+      });
+      const needKey = JSON.stringify([env.data.need, env.data.found]);
+      if (fresh.length === 0 && s.typedKeys.has(needKey)) return;
+      s.typedKeys.add(needKey);
+      env = { ...env, data: { ...env.data, values: fresh } };
       s.typed.push(env.data);
       if (env.session_id !== S.view) return;
       const list = $('#typed');
