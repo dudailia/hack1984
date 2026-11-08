@@ -628,7 +628,7 @@
 
   function jobNode(d, animate) {
     const body = el('div', { class: 'job-body' }, (d.docs || []).map((doc) => docNode(doc, animate)), el('div', { class: 'claims' }));
-    const job = el('section', { class: 'job', 'data-job': d.job || '' });
+    const job = el('section', { class: 'job', 'data-job': d.job || '', 'data-docs': (d.docs || []).length });
     const head = el('button', {
       type: 'button',
       class: 'job-head',
@@ -999,7 +999,8 @@
           el('span', { class: 'v' }, fmtValue(c.value, c.unit)), `  ${c.period || ''}  ${c.document_id}`,
           el('div', { class: 'cq' }, `“${c.quote}”`))),
         dropped.map((c) => el('div', { class: 'claim dropped' }, `${c.document_id} ${c.claim_type} dropped: ${c.reason}`))]);
-      job.querySelector('.job-summary').textContent = ` · ${job.querySelectorAll('.doc').length} documents read, ${kept.length} claims kept`;
+      // The count comes from this job's docs_read event, not from the DOM.
+      job.querySelector('.job-summary').textContent = ` · ${job.dataset.docs} documents read, ${kept.length} claims kept`;
     },
 
     planner_typed(env, o) {
