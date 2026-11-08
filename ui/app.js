@@ -250,7 +250,7 @@
   function renderGateHead() {
     const single = S.uiMode === 'single';
     const s = S.view && S.sessions[S.view];
-    fill($('#gate-title'), single ? dual('Outbound', 'Outbound') : dual('The gate', 'Egress gate'));
+    fill($('#gate-title'), single ? dual('Outbound', 'Outbound') : dual('The gate', 'The gate'));
     let sub = 'the only way out';
     if (single) sub = 'recorded, not enforced';
     else if (s && s.mode === 'two_minds') sub = 'recording only · not enforcing';
