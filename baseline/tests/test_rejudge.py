@@ -156,11 +156,13 @@ class RejudgeTest(unittest.TestCase):
 
     def test_no_fallback_when_the_detector_cannot_load(self):
         from unittest import mock
-        with mock.patch.object(rejudge.judge, "load_detector",
-                               side_effect=judge.DetectorUnavailable("checks/ not found")):
+        with mock.patch.object(rejudge.guard, "install_loopback_guard") as installed, \
+                mock.patch.object(rejudge.judge, "load_detector",
+                                  side_effect=judge.DetectorUnavailable("checks/ not found")):
             with mock.patch("sys.stderr") as err:
                 code = rejudge.main(["--results", self.results, "--review", self.review])
         self.assertEqual(code, 2)
+        installed.assert_called_once_with("baseline")
         self.assertIn("checks/ not found", "".join(c.args[0] for c in err.write.call_args_list))
         with open(self.results, encoding="utf-8") as f:
             self.assertEqual(len(json.load(f)["runs"]), 1)

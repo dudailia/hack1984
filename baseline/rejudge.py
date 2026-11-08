@@ -26,6 +26,7 @@ import sys
 
 from baseline import agent, judge, redteam
 from fake_tavily import pages
+from shared import guard
 
 SUFFIX = " rejudged-frozen"
 MAX_RESULTS = 10  # the Gate's search body asks for 10 (gate/tavily.py SEARCH_BASE)
@@ -169,6 +170,7 @@ def rejudge(results_path, review_path=None, label=None, detector=None, command=N
 
 
 def main(argv=None):
+    guard.install_loopback_guard("baseline")  # reads files only; loopback only, no programs (invariant 1)
     argv = sys.argv[1:] if argv is None else argv
     ap = argparse.ArgumentParser(prog="python3 -m baseline.rejudge", description=__doc__.splitlines()[0])
     ap.add_argument("--results", required=True, metavar="PATH")

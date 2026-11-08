@@ -11,7 +11,8 @@ Routes (§11). The token is required on /api/* and /events, as ?token= or the X-
 - GET /ui/..., /shared/fixtures/..., /shared/results/...   static, read only, no path traversal
 - GET /events                                              SSE; replays the current run; honours Last-Event-ID
 - POST /api/run {mode, source, plant_careless, question}   -> {session_id}
-- POST /api/verify {session_id}                            Gate bundle -> bundles/<id>.json -> proof/verify.py
+- POST /api/verify {session_id}                            Gate bundle -> bundles/<id>.json -> proof.verify
+                                                           .verify_bytes, in process (no program started)
 - POST /api/tamper {session_id, seq}                       one byte changed in a COPY, then verified
 - POST /api/inject {text}, POST /api/inject/reset          "Try to break it": plant text on the stand-in's
                                                            poisoned page (fake_tavily.inject); refused (409)
@@ -21,6 +22,12 @@ Verify, tamper and bundle answer 404 for a session this app did not run or that 
 
 The run loop is app.loop.start_run (Aayush), imported lazily; while it does not exist, app._loop_stub replays
 shared/fixtures/demo_events.jsonl instead (marked STUB LOOP at startup).
+
+Invariant 1: once the children are healthy and the server socket is bound, main() installs
+shared.guard.install_loopback_guard("app"): from then on this process reaches loopback GATE_PORT and OLLAMA_PORT only
+and starts no programs. If the guard cannot be installed (for example .env lacks a port), the app does not start.
+Verification therefore runs in process: proof.verify.verify_bytes (Anant's verifier, which imports nothing of ours)
+is imported before the guard and called on the bundle bytes.
 """
 import argparse
 import atexit
@@ -46,6 +53,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from app.events import PING, EventHub, frame
 from baseline import config
 from fake_tavily import inject as fake_inject
+from shared import guard
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOOPBACK = "127.0.0.1"
@@ -96,12 +104,12 @@ def load_tamper_helper():
         return None
 
 
-def load_guard():
-    """shared.guard.install_loopback_guard if it exists, else None."""
+def load_verifier():
+    """proof.verify.verify_bytes (Anant): bundle bytes -> {"valid", "rows_checked", ...}; None if proof/ is absent."""
     try:
-        if importlib.util.find_spec("shared.guard") is None:
+        if importlib.util.find_spec("proof.verify") is None:
             return None
-        return getattr(importlib.import_module("shared.guard"), "install_loopback_guard", None)
+        return getattr(importlib.import_module("proof.verify"), "verify_bytes", None)
     except ImportError:
         return None
 
@@ -148,13 +156,13 @@ def flip_row_byte(data, seq):
 # ---------------------------------------------------------------- the app
 
 class App:
-    def __init__(self, root=REPO, gate_port=None, token=None, bundles_dir=None, verify_cmd=None, start_run=None,
+    def __init__(self, root=REPO, gate_port=None, token=None, bundles_dir=None, verifier=_LOOKUP, start_run=None,
                  tamper_helper=_LOOKUP, ping_interval=15.0, hub=None, inject_state_path=None):
         self.root = os.path.realpath(root)
         self.gate_port = gate_port if gate_port is not None else config.gate_port()
         self.token = token or secrets.token_urlsafe(32)
         self.bundles_dir = bundles_dir or os.path.join(self.root, "bundles")
-        self.verify_cmd = verify_cmd
+        self.verifier = verifier  # bytes -> result dict; _LOOKUP = proof.verify.verify_bytes; None = absent
         self.start_run = start_run
         self.tamper_helper = tamper_helper
         self.ping_interval = ping_interval
@@ -294,28 +302,23 @@ class App:
                 return f.read()
         return self.fetch_bundle(sid)
 
-    def _verify_cmd(self):
-        if self.verify_cmd:
-            return list(self.verify_cmd)
-        script = os.path.join(self.root, "proof", "verify.py")
-        if not os.path.isfile(script):
-            raise ApiError(503, "proof_unavailable", "proof/verify.py is not present")
-        return [sys.executable, script]
+    def _verifier(self):
+        fn = load_verifier() if self.verifier is _LOOKUP else self.verifier
+        if fn is None:
+            raise ApiError(503, "proof_unavailable", "proof.verify is not present")
+        return fn
 
-    def run_verifier(self, path):
-        """Run the verifier on `path`; return its parsed --json result. valid only if exit 0 and valid is true."""
-        cmd = self._verify_cmd() + [path, "--json"]
+    def run_verifier(self, data):
+        """Verify bundle bytes in process; return the verifier's result. valid only if it says valid is True."""
+        fn = self._verifier()
         try:
-            r = subprocess.run(cmd, capture_output=True, timeout=30, cwd=self.root)
-        except (OSError, subprocess.SubprocessError) as e:
-            raise ApiError(502, "verifier_error", "verifier did not run: %s" % e.__class__.__name__)
-        try:
-            out = json.loads(r.stdout.decode("utf-8").strip().splitlines()[-1])
-        except (ValueError, IndexError, UnicodeDecodeError):
-            out = None
+            out = fn(bytes(data))
+        except Exception as e:  # noqa: BLE001  (another owner's code; report, never crash the server)
+            raise ApiError(502, "verifier_error", "verifier failed: %s" % e.__class__.__name__)
         if not isinstance(out, dict) or "valid" not in out:
-            raise ApiError(502, "verifier_error", "verifier output is not the --json result")
-        out["valid"] = out.get("valid") is True and r.returncode == 0
+            raise ApiError(502, "verifier_error", "verifier result is not the verify_bytes result")
+        out = dict(out)
+        out["valid"] = out.get("valid") is True
         return out
 
     def _proof_data(self, result, bundle, tampered, seq):
@@ -328,9 +331,9 @@ class App:
     def api_verify(self, body):
         _only_keys(body, {"session_id"})
         sid = self.finished_session(body.get("session_id"))
-        self._verify_cmd()  # 503 before fetching if there is no verifier
+        self._verifier()  # 503 before fetching if there is no verifier
         data = self.fetch_bundle(sid)
-        result = self.run_verifier(self.bundle_path(sid))
+        result = self.run_verifier(data)
         proof = self._proof_data(result, json.loads(data), False, None)
         self.hub.emit("proof_result", sid, proof)
         return proof
@@ -343,7 +346,7 @@ class App:
             raise ApiError(400, "bad_request", "seq must be a positive integer")
         helper = load_tamper_helper() if self.tamper_helper is _LOOKUP else self.tamper_helper
         if helper is None:
-            self._verify_cmd()
+            self._verifier()
         original = self.saved_bundle(sid)
         bundle = json.loads(original)
         if not any(isinstance(r, dict) and r.get("seq") == seq for r in bundle.get("rows", [])):
@@ -358,8 +361,9 @@ class App:
             if not isinstance(result, dict):
                 raise ApiError(502, "verifier_error", "tamper helper returned no result")
         else:
-            _write_atomic(copy_path, flip_row_byte(original, seq))
-            result = self.run_verifier(copy_path)
+            tampered = flip_row_byte(original, seq)
+            _write_atomic(copy_path, tampered)
+            result = self.run_verifier(tampered)
         if result.get("valid") is not False:
             raise ApiError(502, "verifier_error", "a tampered copy must not verify")
         proof = self._proof_data(result, bundle, True, seq)
@@ -589,17 +593,23 @@ def main(argv=None):
     except KeyboardInterrupt:
         return 130
 
-    guard = load_guard()
-    if guard is not None:
-        guard()
-    else:
-        # TODO(guard): shared.guard.install_loopback_guard() (invariant 1) once it lands in shared/. Note that
-        # /api/verify starts proof/verify.py as a subprocess, so the guard must allow that.
-        print("app: shared.guard not found; loopback guard NOT installed (TODO)", file=sys.stderr)
-
-    start_run, is_stub = load_start_run()
-    app = App(gate_port=gate_port, start_run=start_run)
-    srv = make_server(app, port)
+    # Everything that needs more than loopback Gate/Ollama is done before the guard: children started, verifier
+    # and tamper helper imported, server socket bound.
+    app = App(gate_port=gate_port, verifier=load_verifier(), tamper_helper=load_tamper_helper())
+    try:
+        srv = make_server(app, port)
+    except OSError as e:
+        print("app: cannot bind 127.0.0.1:%d: %s" % (port, e), file=sys.stderr)
+        kids.stop()
+        return 1
+    try:
+        guard.install_loopback_guard("app")  # loopback GATE_PORT/OLLAMA_PORT only, no programs (invariant 1)
+    except (OSError, ValueError, RuntimeError) as e:
+        print("app: loopback guard not installed, refusing to start: %s" % e, file=sys.stderr)
+        srv.server_close()
+        kids.stop()
+        return 1
+    app.start_run, is_stub = load_start_run()
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     if is_stub:
         print("app: STUB LOOP (app/loop.py not found): runs replay shared/fixtures/demo_events.jsonl", file=sys.stderr)

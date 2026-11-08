@@ -17,8 +17,8 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-from baseline import netguard
 from fake_tavily import inject, pages
+from shared import guard
 
 LOOPBACK = "127.0.0.1"
 DEFAULT_PORT = 8702
@@ -226,11 +226,13 @@ def make_server(port=None, host=LOOPBACK, fixtures_dir=pages.DEFAULT_FIXTURES, s
 
 
 def main(argv=None):
-    netguard.install()  # loopback only from here on (invariant 1); swap for shared.guard when it lands
     ap = argparse.ArgumentParser(prog="python3 -m fake_tavily.server", description="Loopback Tavily stand-in")
     ap.add_argument("--port", type=int, default=None, help="default: FAKE_TAVILY_PORT from env/.env, else 8702")
     args = ap.parse_args(argv)
     srv = make_server(port=args.port, verbose=True)
+    # After binding (so --port 0 and test ports keep working): from here on no connect, no further bind, no DNS
+    # beyond loopback and no programs (invariant 1). The stand-in only answers on the socket it already has.
+    guard.install_loopback_guard("fake_tavily")
     print("fake tavily on http://%s:%d" % srv.server_address[:2], flush=True)
     try:
         srv.serve_forever()
