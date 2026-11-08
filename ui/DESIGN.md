@@ -120,7 +120,8 @@ events the app already emits (no new fields):
 - **Which run:** `Analyst.pickRun` (`ui/analyst.js`). Replay: of the doublethink runs started so far, the real-source,
   non-careless one first, then a fake-source non-careless one, then any doublethink run; the latest wins within a
   rank. The planted careless run and single-agent runs are never the analyst's run. Live: the latest doublethink run.
-- **Hidden in this view:** the step strip, the three rooms (memo, typed facts, gate, reader, proof), the Outbound strip,
+- **Hidden in this view:** the step strip (kept in the DOM and shown in the Audit view; the receipt and the Verified
+  badge replace it here), the three rooms (memo, typed facts, gate, reader, proof), the Outbound strip,
   the footer counters, the mode toggle, the careless checkbox and the header's Verify button.
 - **Audit view:** today's full screen, unchanged. The header button "Audit view" switches (it then reads "Analyst
   view"), and `?view=audit` opens it directly. The 1984 theme always shows the Audit view (the Analyst view is
