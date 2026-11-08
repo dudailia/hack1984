@@ -93,7 +93,7 @@
   function session(sid) {
     if (!S.sessions[sid]) {
       S.sessions[sid] = {
-        rows: [], typed: [], typedKeys: new Set(), urls: {}, secrets: [], canary: null, mode: null, source: null, careless: false,
+        rows: [], typed: [], typedKeys: new Set(), urls: {}, secrets: [], secretsReady: false, canary: null, mode: null, source: null, careless: false,
         memo: '', title: '', sha: '', answer: null, done: null,
         m: { leaks: 0, blocked: 0, credits: 0, seconds: null },
       };
@@ -219,6 +219,7 @@
     if (m === 'single') $('#source').value = 'fake';
     setEye(m === 'single');
     renderGateHead();
+    renderMemo();   // the clear copy exists only while the single agent layout is shown
   }
 
   function renderBadge() {
@@ -369,9 +370,15 @@
     return terms;
   }
 
-  function redacted(text, sid) {
-    return splitTerms(text, memoTerms(sid), true).map((seg) => (seg.term
-      ? el('button', { type: 'button', class: 'redact', 'data-label': seg.term.label, 'aria-label': `hidden: ${seg.term.label}` }, seg.text)
+  // Secrets are replaced before anything reaches the DOM: a bar carries only its label (shown on hover),
+  // padded with figure spaces to the secret's length. canaryOnly: the single agent's clear copy, where only
+  // the canary is hidden. The canary is never rendered anywhere.
+  function redacted(text, sid, canaryOnly = false) {
+    const s = session(sid);
+    const terms = canaryOnly ? (s.canary ? [{ text: s.canary, label: 'canary' }] : []) : memoTerms(sid);
+    return splitTerms(text, terms, true).map((seg) => (seg.term
+      ? el('button', { type: 'button', class: 'redact', 'data-label': seg.term.label, 'aria-label': `hidden: ${seg.term.label}` },
+        seg.term.label.padEnd(seg.text.length, '\u2007'))
       : seg.text));
   }
 
@@ -381,19 +388,22 @@
     const subject = s.title || '—';
     return el('article', { class: 'paper', 'aria-label': 'Confidential memo' },
       el('p', { class: 'tw t-classic' }, 'FILE 1984', s.sha ? `  ·  SHA ${shortHash(s.sha)}` : ''),
-      el('p', { class: 'tw t-classic' }, 'SUBJECT: ', redact ? redacted(subject, sid) : subject),
+      el('p', { class: 'tw t-classic' }, 'SUBJECT: ', redacted(subject, sid, !redact)),
       el('div', { class: 'stamp-row t-classic' }, el('span', { class: 'confidential' }, 'CONFIDENTIAL')),
       el('div', { class: 'doc-head t-console' },
         el('p', { class: 'doc-name' }, 'Deal memo'),
         el('p', { class: 'doc-meta', title: redact ? 'Hover a bar to see what kind of secret it hides' : '' }, redact ? 'Redacted on screen' : 'Shown in full',
           s.sha ? [' · sha ', el('span', { class: 'mono', title: s.sha }, shortHash(s.sha))] : '')),
-      el('div', { class: 'memo' }, redact ? redacted(s.memo, sid) : s.memo));
+      el('div', { class: 'memo' }, redacted(s.memo, sid, !redact)));
   }
 
   function renderMemo(sid = S.view) {
-    if (!sid || !session(sid).memo) return;
+    // Nothing is rendered until parties_confirmed says what to redact (memo_loaded arrives first).
+    if (!sid || !session(sid).memo || !session(sid).secretsReady) return;
     fill($('#dossier'), dossier(sid, true));
-    fill($('#agent-dossier'), dossier(sid, false));   // the single agent holds the memo in the clear
+    // The single agent holds the memo in the clear (canary still hidden); outside that layout it is not in the DOM.
+    if (S.uiMode === 'single') fill($('#agent-dossier'), dossier(sid, false));
+    else fill($('#agent-dossier'), waiting('waiting for the memo'));
   }
 
   // ---------- typed facts: what the Planner receives, as receipt chips ----------
@@ -911,6 +921,7 @@
       for (const g of env.data.confirmed_secrets || []) {
         for (const v of g.values || []) s.secrets.push({ text: v, label: g.label });
       }
+      s.secretsReady = true;
       if (env.session_id === S.current) renderMemo();
     },
 

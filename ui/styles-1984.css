@@ -355,7 +355,6 @@ body.replay .live-only, body.live .replay-only { display: none !important; }
   line-height: inherit;
 }
 .redact:hover, .redact:focus-visible { color: var(--paper); }
-.redact:hover::after, .redact:focus-visible::after { content: " (" attr(data-label) ")"; }
 .paper :focus-visible { outline-color: var(--ink); }
 
 /* ---------- typed facts ---------- */
