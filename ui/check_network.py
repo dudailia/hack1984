@@ -2,7 +2,8 @@
 
     python ui/check_network.py        ->  writes ui/evidence/network-replay.md, exit 0 only if loopback-only
 
-Plays the full replay of ui/index.html (both themes) in headless Edge or Chrome, served by ui/preview.py on an
+Plays the full replay of ui/index.html (Analyst and Audit views, both themes) and loads ui/workspace.html in
+headless Edge or Chrome, served by ui/preview.py on an
 ephemeral 127.0.0.1 port, and records two views of every request:
   1. the browser's own net log (--log-net-log): every URL request and every host lookup, page or browser;
   2. the page's Resource Timing list, collected by ui/tests/net.check.html.
@@ -103,10 +104,21 @@ def netlog_hosts(path, page_origin):
     return analyse_netlog(path, page_origin)
 
 
-def run_theme(port, theme, workdir):
-    netlog = os.path.join(workdir, f"netlog-{theme}.json")
-    profile = os.path.join(workdir, f"profile-{theme}")
-    url = f"http://127.0.0.1:{port}/ui/tests/net.check.html?theme={theme}"
+# Each run: (name, query for ui/tests/net.check.html). The Analyst view is the console default; the Audit view is the
+# full three-panel screen; the 1984 theme always shows the Audit view; workspace.html is the plug-in prototype.
+RUNS = (
+    ("console, Analyst view", "theme=console&view=analyst"),
+    ("console, Audit view", "theme=console&view=audit"),
+    ("1984 (Audit view)", "theme=1984&view=audit"),
+    ("workspace.html", "page=workspace"),
+)
+
+
+def run_theme(port, theme, workdir, query=None):
+    slug = re.sub(r"[^a-z0-9]+", "-", theme.lower()).strip("-")
+    netlog = os.path.join(workdir, f"netlog-{slug}.json")
+    profile = os.path.join(workdir, f"profile-{slug}")
+    url = f"http://127.0.0.1:{port}/ui/tests/net.check.html?{query or 'theme=' + theme}"
     cmd = [BROWSER, *QUIET_FLAGS, f"--user-data-dir={profile}", "--window-size=1320,900",
            f"--log-net-log={netlog}", "--net-log-capture-mode=Default",
            f"--virtual-time-budget={VIRTUAL_BUDGET_MS}", "--dump-dom", url]
@@ -146,7 +158,7 @@ def main(out=EVIDENCE):
     threading.Thread(target=server.serve_forever, daemon=True).start()
     workdir = tempfile.mkdtemp(prefix="dt-netcheck-")
     try:
-        runs = [run_theme(port, t, workdir) for t in ("console", "1984")]
+        runs = [run_theme(port, name, workdir, query) for name, query in RUNS]
     finally:
         server.shutdown()
         server.server_close()
@@ -187,7 +199,9 @@ def main(out=EVIDENCE):
         "",
         "Method:",
         "- The page is served by `ui/preview.py` on an ephemeral 127.0.0.1 port.",
-        "- The full replay (`?title=0&play=1`, all 175 s of the fixture) plays in each theme until the status shows ■.",
+        "- The full replay (`?title=0&play=1`, all 175 s of the fixture) plays until the status shows ■: in the console"
+        " theme in the Analyst view (the default) and in the Audit view, and in the 1984 theme. `ui/workspace.html`"
+        " (the plug-in prototype) is loaded until it shows the deal name.",
         "- Three views are recorded:",
         "  1. **Page requests** in the browser's net log (`--log-net-log`): URL requests whose initiator is the page's"
         " origin, plus navigations to it.",
@@ -212,7 +226,7 @@ def main(out=EVIDENCE):
     for r, page, ext_page_req, ext_resources, ext_connects in lines:
         net = r["net"]
         report += [
-            f"## Theme: {r['theme']}",
+            f"## Run: {r['theme']}",
             "",
             f"- Replay reached the end: {'yes' if page.get('ended') else 'no'} (status `{page.get('status', '')}`)."
             f" Results screen shown during the replay: {'yes' if page.get('resultsShown') else 'no'}.",
@@ -242,7 +256,7 @@ def main(out=EVIDENCE):
         report.append("")
     if problems:
         report += ["## Problems", ""] + [f"- {p}" for p in problems] + [""]
-    report += ["Requests the preview server answered (both themes): " + str(len(served)) + ".", ""]
+    report += ["Requests the preview server answered (all runs): " + str(len(served)) + ".", ""]
 
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8", newline="\n") as f:

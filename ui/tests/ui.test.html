@@ -7,6 +7,7 @@
 <script src="../outbound.js"></script>
 <script src="../results.js"></script>
 <script src="../runview.js"></script>
+<script src="../analyst.js"></script>
 </head>
 <body>
 <!-- Run by ui/tests/test_ui_browser.py through headless Edge and ui/preview.py. Results land in #result. -->
@@ -30,8 +31,11 @@
   const EV = EVENTS_NAME === 'demo_events.jsonl' ? '' : `&events=${EVENTS_NAME}`;
 
   // Load the page under test at a replay time and wait until the seek is done.
+  // Every existing test is about the full three-panel screen, so the default here is ?view=audit; the Analyst view
+  // tests pass view=analyst (or view=none for the page's own default).
   async function load(query) {
-    await new Promise((resolve) => { frame.onload = resolve; frame.src = `../index.html?${query}${EV}`; });
+    const q = /(^|&)view=/.test(query) ? query.replace(/(^|&)view=none/, '') : `${query}&view=audit`;
+    await new Promise((resolve) => { frame.onload = resolve; frame.src = `../index.html?${q}${EV}`; });
     for (let i = 0; i < 200; i += 1) {
       const st = frame.contentDocument && frame.contentDocument.getElementById('replay-status');
       if (st && /\d:\d\d/.test(st.textContent)) return frame.contentDocument;
@@ -41,6 +45,26 @@
   }
   const visible = (doc, node) => !!node && doc.defaultView.getComputedStyle(node).display !== 'none'
     && node.getClientRects().length > 0;
+  // Load ui/workspace.html (same ?events=) and wait until it has read the replay file.
+  async function loadWorkspace() {
+    await new Promise((resolve) => { frame.onload = resolve; frame.src = `../workspace.html${EV ? `?${EV.slice(1)}` : ''}`; });
+    for (let i = 0; i < 200; i += 1) {
+      if (frame.contentDocument && frame.contentDocument.body && frame.contentDocument.body.dataset.ready === '1') return frame.contentDocument;
+      await sleep(25);
+    }
+    throw new Error('workspace did not finish loading');
+  }
+  // Every visible text node under root, with its computed font size.
+  const smallText = (doc, root) => {
+    const bad = [];
+    const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (!n.textContent.trim() || !n.parentElement || !visible(doc, n.parentElement)) continue;
+      const px = parseFloat(doc.defaultView.getComputedStyle(n.parentElement).fontSize);
+      if (px < 16) bad.push(`${px}px "${n.textContent.trim().slice(0, 30)}"`);
+    }
+    return bad;
+  };
 
   try {
     const text = await (await fetch(`/shared/fixtures/${EVENTS_NAME}`, { cache: 'no-store' })).text();
@@ -410,6 +434,139 @@
       const doc = await load(`at=${doneAt(ROLE.compromised)}&theme=1984`);
       ok('panel hidden in the 1984 theme', !visible(doc, doc.getElementById('outbound')), 'visible');
       ok('1984 footer still visible', visible(doc, doc.querySelector('footer.bottom')), 'footer hidden');
+    }
+
+    // ---------- Analyst view (the default console screen) ----------
+    {
+      const A = window.Analyst;
+      ok('analyst.js loaded', A && typeof A.pickRun === 'function', 'window.Analyst missing');
+      // Units.
+      const runs = [
+        { sid: 'a', mode: 'compromised', source: 'fake', careless: false, order: 1 },
+        { sid: 'b', mode: 'doublethink', source: 'fake', careless: false, order: 2 },
+        { sid: 'c', mode: 'doublethink', source: 'real', careless: false, order: 3 },
+        { sid: 'd', mode: 'doublethink', source: 'real', careless: true, order: 4 },
+      ];
+      ok('pickRun: replay prefers the real, not-careless doublethink run', A.pickRun(runs, false) === 'c', A.pickRun(runs, false));
+      ok('pickRun: fake before careless when no real run', A.pickRun(runs.slice(0, 2).concat(runs[3]).map((r) => ({ ...r, source: r.sid === 'd' ? 'real' : r.source })), false) === 'b', 'wrong pick');
+      ok('pickRun: live shows the latest doublethink run', A.pickRun(runs, true) === 'd', A.pickRun(runs, true));
+      ok('pickRun: never the single agent', A.pickRun(runs.slice(0, 1), false) === null, 'picked a single-agent run');
+      ok('verified: only when the latest proof is VALID', A.verified([{ valid: true }]) && !A.verified([{ valid: true }, { valid: false }]) && !A.verified([]), 'wrong');
+      const body = A.runRequest('  What are industrial cap rates?  ', 'real');
+      ok('runRequest: a Doublethink run with the question', JSON.stringify(body) === JSON.stringify({ mode: 'doublethink', source: 'real', plant_careless: false, question: 'What are industrial cap rates?' }), JSON.stringify(body));
+      let threw = 0;
+      for (const bad of ['', '   ', 'x'.repeat(501)]) { try { A.runRequest(bad, 'fake'); } catch (_) { threw += 1; } }
+      ok('runRequest: refuses empty and over-500-character questions', threw === 3, `${threw} of 3 refused`);
+      ok('withoutCanary removes the canary', A.withoutCanary('A zzcanaryzz B', 'zzcanaryzz') === 'A B', A.withoutCanary('A zzcanaryzz B', 'zzcanaryzz'));
+
+      // Which run the Analyst view should show at time t, computed here from the events (independent of pickRun).
+      const expectedPick = (t) => {
+        const dt = starts.filter((e) => e.t_ms <= t && e.data.mode === 'doublethink');
+        for (const okRun of [(e) => e.data.source === 'real' && !e.data.plant_careless, (e) => !e.data.plant_careless, () => true]) {
+          const hit = dt.filter(okRun);
+          if (hit.length) return hit[hit.length - 1].session_id;
+        }
+        return null;
+      };
+      const an = (doc) => doc.getElementById('analyst');
+
+      // Default view, panels, fit, 16px.
+      const tDone = doneAt(ROLE.dtreal);
+      let doc = await load(`at=${tDone}&theme=console&view=none`);
+      ok('analyst: the default console view', doc.body.classList.contains('view-analyst') && visible(doc, an(doc)), doc.body.className);
+      const shownAudit = ['main', 'outbound', 'steps'].filter((id) => visible(doc, doc.getElementById(id)))
+        .concat(visible(doc, doc.querySelector('footer.bottom')) ? ['footer'] : []);
+      ok('analyst: no memo panel, typed facts, gate or Outbound strip on screen', shownAudit.length === 0, shownAudit.join(', '));
+      ok('analyst: fits 1280x720', doc.documentElement.scrollHeight <= 721 && doc.documentElement.scrollWidth <= 1281, `${doc.documentElement.scrollWidth}x${doc.documentElement.scrollHeight}`);
+      const small = smallText(doc, an(doc)).concat(smallText(doc, doc.querySelector('header.top')));
+      ok('analyst: every text at least 16px', small.length === 0, small.slice(0, 5).join('; '));
+
+      // Answer with sources, receipt, question.
+      const pick = expectedPick(tDone);
+      const ans = of(pick, 'answer')[0];
+      const anText = an(doc).textContent;
+      const items = ans ? ans.data.needs.flatMap((n) => n.items || []) : [];
+      const missing = items.filter((it) => !has(anText, it.quote) || !has(anText, it.source.url) || !has(anText, it.source.title));
+      ok('analyst: the answer shows every number with its quote and source', !!ans && items.length > 0 && missing.length === 0, `${missing.length} of ${items.length} missing`);
+      ok('analyst: receipt computed from that run\'s ledger rows', doc.getElementById('an-receipt-sum').textContent === O.summaryText(O.summarize(sessions[pick]))
+        && doc.getElementById('an-receipt-check').textContent === O.check(O.summarize(sessions[pick])).text, doc.getElementById('an-receipt-sum').textContent);
+      ok('analyst: question from run_started', doc.getElementById('an-question').value === one(pick, 'run_started').data.question && doc.getElementById('an-question').readOnly, doc.getElementById('an-question').value);
+      ok('analyst: the replay shows the real-source run when there is one', has(doc.getElementById('session-pill').textContent, '') && pick === ROLE.dtreal, `${pick} vs ${ROLE.dtreal}`);
+
+      // Verified badge: absent before verify, present after a VALID proof, absent after the tamper.
+      const badge = (d) => visible(d, d.getElementById('an-verified'));
+      ok('analyst: no Verified badge before the proof is checked', !badge(doc), 'badge shown');
+      doc = await load(`at=${after(verify)}&theme=console&view=analyst`);
+      ok('analyst: Verified badge after a VALID proof_result', verify.data.valid === true && badge(doc) && has(doc.getElementById('an-proof').textContent, String(verify.data.rows_checked)), doc.getElementById('an-proof').textContent);
+      doc = await load(`at=${after(tamper)}&theme=console&view=analyst`);
+      ok('analyst: no Verified badge after an INVALID proof_result', tamper.data.valid === false && !badge(doc), 'badge still shown');
+
+      // Deal header only after that run's parties_confirmed; the title in clear; never the memo body.
+      for (const st of starts.filter((e) => e.data.mode === 'doublethink' && !e.data.plant_careless)) {
+        const sid = st.session_id;
+        const memo = one(sid, 'memo_loaded');
+        const pc = one(sid, 'parties_confirmed');
+        if (!memo || !pc || expectedPick(memo.t_ms) !== sid) continue;
+        let d = await load(`at=${memo.t_ms}&theme=console&view=analyst`);
+        ok(`analyst: no deal header before parties_confirmed (${sid})`, !visible(d, d.getElementById('an-deal')), 'header shown');
+        d = await load(`at=${pc.t_ms}&theme=console&view=analyst`);
+        ok(`analyst: deal header from memo_loaded after parties_confirmed (${sid})`, visible(d, d.getElementById('an-deal'))
+          && d.getElementById('an-deal-title').textContent === memo.data.title, d.getElementById('an-deal-title').textContent);
+        const labels = [...new Set(pc.data.confirmed_secrets.map((g) => g.label))];
+        ok(`analyst: protected labels from parties_confirmed (${sid})`, labels.every((l) => has(d.getElementById('an-protected').textContent, l)), d.getElementById('an-protected').textContent);
+      }
+      const memoLines = [...new Set(events.filter((e) => e.type === 'memo_loaded')
+        .flatMap((e) => (e.data.text || '').split('\n').map((l) => l.trim()).filter((l) => l.length >= 12 && l !== e.data.title)))];
+      let bodySeen = [];
+      let canarySeenA = [];
+      const canariesA = [...new Set(events.filter((e) => e.type === 'memo_loaded').map((e) => e.data.canary).filter(Boolean))];
+      for (const t of [...new Set(events.map((e) => e.t_ms))]) {
+        const d = await load(`at=${Math.max(1, t)}&theme=console&view=analyst`);
+        const html = an(d).outerHTML;
+        for (const l of memoLines) if (html.includes(l)) bodySeen.push(`${t}: ${l.slice(0, 30)}`);
+        const all = d.documentElement.outerHTML;
+        for (const c of canariesA) if (all.includes(c)) canarySeenA.push(`${t}`);
+      }
+      ok('analyst: never shows a line of the memo body', memoLines.length > 0 && bodySeen.length === 0, bodySeen.slice(0, 3).join('; '));
+      ok('analyst: canary never in the DOM at any event time', canariesA.length > 0 && canarySeenA.length === 0, canarySeenA.join(', '));
+
+      // Toggle and ?view=audit.
+      doc = await load(`at=${tDone}&theme=console&view=analyst`);
+      doc.getElementById('view-toggle').click();
+      ok('toggle: "Audit view" shows the full screen', visible(doc, doc.getElementById('main')) && !visible(doc, an(doc)) && doc.getElementById('view-toggle').textContent === 'Analyst view', doc.body.className);
+      doc.getElementById('view-toggle').click();
+      ok('toggle: back to the Analyst view', !visible(doc, doc.getElementById('main')) && visible(doc, an(doc)), doc.body.className);
+      doc = await load(`at=${tDone}&theme=console&view=audit`);
+      ok('?view=audit opens the full screen', visible(doc, doc.getElementById('main')) && !visible(doc, an(doc)), doc.body.className);
+      doc = await load(`at=${tDone}&theme=1984&view=none`);
+      ok('1984 theme shows the Audit view', visible(doc, doc.getElementById('main')) && !visible(doc, an(doc)), doc.body.className);
+    }
+
+    // ---------- plug-in prototype: ui/workspace.html ----------
+    {
+      const doc = await loadWorkspace();
+      const pickAll = (() => {
+        const dt = starts.filter((e) => e.data.mode === 'doublethink');
+        for (const okRun of [(e) => e.data.source === 'real' && !e.data.plant_careless, (e) => !e.data.plant_careless, () => true]) {
+          const hit = dt.filter(okRun);
+          if (hit.length) return hit[hit.length - 1].session_id;
+        }
+        return null;
+      })();
+      const memo = one(pickAll, 'memo_loaded');
+      ok('workspace: deal name from memo_loaded', !!memo && doc.getElementById('ws-deal-name').textContent === memo.data.title, doc.getElementById('ws-deal-name').textContent);
+      ok('workspace: prototype label', has(doc.body.textContent, 'Plug-in prototype. Office add-in is roadmap.') && visible(doc, doc.getElementById('ws-label')), 'label missing');
+      const href = new URL(doc.getElementById('ws-research').href);
+      ok('workspace: "Research safely" opens the Analyst view of the same replay', href.pathname.endsWith('/ui/index.html')
+        && href.searchParams.get('view') === 'analyst' && (EV ? href.searchParams.get('events') === EVENTS_NAME : !href.searchParams.has('events')), href.href);
+      const canaries = [...new Set(events.filter((e) => e.type === 'memo_loaded').map((e) => e.data.canary).filter(Boolean))];
+      ok('workspace: canary never in the DOM', canaries.every((c) => !doc.documentElement.outerHTML.includes(c)), 'canary found');
+      const memoBody = (memo.data.text || '').split('\n').map((l) => l.trim()).filter((l) => l.length >= 12 && l !== memo.data.title);
+      ok('workspace: no memo body', memoBody.every((l) => !doc.body.textContent.includes(l)), 'memo line found');
+      ok('workspace: fits 1280x720', doc.documentElement.scrollHeight <= 721 && doc.documentElement.scrollWidth <= 1281, `${doc.documentElement.scrollWidth}x${doc.documentElement.scrollHeight}`);
+      const small = smallText(doc, doc.body);
+      ok('workspace: every text at least 16px', small.length === 0, small.slice(0, 5).join('; '));
+      ok('workspace: loads nothing from outside its origin', doc.defaultView.performance.getEntriesByType('resource').every((e) => new URL(e.name).hostname === '127.0.0.1'), 'external resource');
     }
 
     // ---------- regression: the four fixes on main ----------
