@@ -28,6 +28,10 @@ _SUFFIXES = {"inc", "incorporated", "corp", "corporation", "co", "company", "plc
 _SUBJECT_NUMBER = re.compile(r"[0-9]+(?:[.,][0-9]+)*")
 WITHHELD_SUBJECT = "[subject withheld]"
 _MONEY = {"usd": ("$", ""), "usd_millions": ("$", " million"), "usd_billions": ("$", " billion")}
+# Growth section: at most this many facts, most recent period first. Growth of an expense is not growth of the
+# business ("Operating expense growth 9%"), so a growth claim whose subject names one is left out.
+MAX_GROWTH = 5
+_EXPENSE_SUBJECT_RE = re.compile(r"\b(?:expense|expenses|cost|costs|opex|spending)\b", re.IGNORECASE)
 
 
 def _fmt(value):
@@ -115,6 +119,29 @@ def _item_phrase(item, year):
     return "%s: %s%s" % (s, v, _period_phrase(p, "for"))
 
 
+def _is_expense_growth(claim):
+    return claim["claim_type"] == "revenue_growth" and bool(_EXPENSE_SUBJECT_RE.search(normalize(claim["subject"])))
+
+
+def _recency(item, year):
+    """Sort key, larger is more recent: (last year, first year) of the period; "ttm" is this year; no year last."""
+    period = item["period"]
+    if period == "ttm":
+        return (year, year)
+    end = _period_end(period)
+    if end is None:
+        return (-1, -1)
+    first = period.split("-")[0]
+    return (end, int(first) if len(first) == 4 and first.isdigit() else end)
+
+
+def _growth_section(items, year):
+    """Growth facts most recent first, at most MAX_GROWTH; other claim types follow unchanged."""
+    growth = sorted((i for i in items if i["claim_type"] == "revenue_growth"),
+                    key=lambda i: _recency(i, year), reverse=True)  # stable: ties keep value order
+    return growth[:MAX_GROWTH] + [i for i in items if i["claim_type"] != "revenue_growth"]
+
+
 def _headline(need, items):
     """Median multiple across companies for the most common period; None unless at least two companies.
     Aggregates are not companies; items are already one per company and period (compose)."""
@@ -182,7 +209,7 @@ def compose(question, needs, kept, sources, today=None):
     for claim in sorted(kept, key=lambda c: c["document_id"]):
         src = sources.get(claim["document_id"])
         need = next((n for n in needs if claim["claim_type"] in n.get("claim_types", [])), None)
-        if src is None or need is None:
+        if src is None or need is None or _is_expense_growth(claim):
             continue
         bucket = buckets[need["need"]]
         subject = _subject(claim)
@@ -199,6 +226,8 @@ def compose(question, needs, kept, sources, today=None):
     out_needs, texts = [], []
     for need in needs:
         items = sorted(buckets[need["need"]], key=lambda i: (to_decimal(i["value"]), i["source"]["result_id"]))
+        if "revenue_growth" in need.get("claim_types", []):
+            items = _growth_section(items, year)
         headline, used = _headline(need, items)
         out_needs.append({"need": need["need"], "status": "found" if items else "not_found",
                           "headline": headline, "items": items})
