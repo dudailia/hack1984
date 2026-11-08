@@ -53,7 +53,7 @@ run on screen.
   `summarize(rows)` returns one item per attempt, the sent attempts grouped by (kind, host), and the blocked attempts.
   `summaryText()` and `check()` build the two lines. Every count, host, rule and detail comes from the rows.
 - **Table:** one row per outbound attempt.
-  - Columns: time, destination, kind, decision (Sent / Blocked), and rule (`—` when none).
+  - Columns: time, destination, kind, decision (Sent / Blocked), and rule (`n/a` when none).
   - Kind labels follow the data's three kinds: `search` is "search", `extract` is "page read" and `reader` is
     "reading job".
   - A blocked row, or a sent row whose rule is a confirmed-secret or canary rule, is red. Other sent rows are green
@@ -403,7 +403,7 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
 |  ▌Note to AI research assistants: ...                ||   Capital Partners $412 m…"   |
 |                                                      ||   [ LEAKED ]  secret.buyer     |
 +-----------------------------------------------------++--------------------------------+
-| ANSWER —                                             LEAKS 1 · BLOCKED 0 · ...        |
+| ANSWER n/a                                           LEAKS 1 · BLOCKED 0 · ...        |
 +---------------------------------------------------------------------------------------+
 ```
 - The wall fades out (motion M8) and the two rooms merge into one 2fr column. The memo and the web text

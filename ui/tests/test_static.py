@@ -43,6 +43,27 @@ class StaticPage(unittest.TestCase):
         self.assertIn("if (s.done) bits.push(window.RunView.outcomeText(s.done));", js)
         self.assertNotRegex(js, r"Run ended: \$\{s\.done\.outcome\}")
 
+    def test_no_em_dashes_anywhere_in_ui(self):
+        # Empty cells read "n/a". No em dash in any text file under ui/, literal or escaped.
+        # Built from parts so this file does not contain the forms it looks for.
+        forms = (chr(0x2014), "&" + "mdash;", "&" + "#8212;", "&" + "#x2014;", "\\" + "u2014")
+        found = []
+        for root, dirs, files in os.walk(UI):
+            dirs[:] = [d for d in dirs if d not in ("__pycache__", "screenshots")]
+            for name in files:
+                if not name.endswith((".html", ".css", ".js", ".md", ".py", ".json", ".txt")):
+                    continue
+                with open(os.path.join(root, name), encoding="utf-8") as f:
+                    text = f.read()
+                for bad in forms:
+                    if bad in text:
+                        found.append(f"{os.path.relpath(os.path.join(root, name), UI)}: {bad!r}")
+        self.assertEqual(found, [])
+
+    def test_empty_cells_read_na(self):
+        self.assertIn('<span id="answer-text" class="answer-text">n/a</span>', read("index.html"))
+        self.assertIn("el('span', { class: 'ob-none' }, 'n/a')", read("app.js"))
+
     def test_console_theme_has_no_hacker_decorations(self):
         css = read("styles.css")
         self.assertNotIn("repeating-linear-gradient", css)

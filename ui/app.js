@@ -227,7 +227,7 @@
     const s = S.view && S.sessions[S.view];
     if (s && s.source === 'real') b.textContent = 'SOURCE: api.tavily.com (real)';
     else if (s && s.source === 'fake') b.textContent = 'SOURCE: LOCAL STAND-IN (fake)';
-    else b.textContent = 'SOURCE: —';
+    else b.textContent = 'SOURCE: n/a';
     b.title = b.textContent;
     const pill = $('#session-pill');
     pill.hidden = !(S.view && s);
@@ -331,7 +331,7 @@
     setCounter('#m-leaks', m.leaks, animate);
     setCounter('#m-blocked', m.blocked, animate);
     setCounter('#m-credits', m.credits, animate);
-    setCounter('#m-seconds', m.seconds == null ? '—' : `${m.seconds} s`, false);
+    setCounter('#m-seconds', m.seconds == null ? 'n/a' : `${m.seconds} s`, false);
     $('#m-leaks').classList.toggle('hot', m.leaks > 0);
     $('#m-blocked').classList.toggle('hot', m.blocked > 0);
   }
@@ -347,7 +347,7 @@
     else if (s && s.done) {
       t.textContent = `No answer. Run ended: ${window.RunView.outcomeText(s.done)}.`;
       t.classList.toggle('bad', s.done.outcome === 'leaked' || s.done.outcome === 'blocked');
-    } else t.textContent = '—';
+    } else t.textContent = 'n/a';
   }
 
   // ---------- Outbound panel (console theme): logic in outbound.js, numbers from the ledger events only ----------
@@ -367,7 +367,7 @@
         el('td', null, el('span', { class: `ob-decision ${a.decision}${leak ? ' leak' : ''}` }, a.decision === 'blocked' ? 'Blocked' : 'Sent')),
         el('td', null, a.rule
           ? el('span', { class: `ob-rule mono${a.decision === 'blocked' || leak ? ' bad' : ''}`, title: a.detail || a.rule }, a.rule)
-          : el('span', { class: 'ob-none' }, '—')));
+          : el('span', { class: 'ob-none' }, 'n/a')));
     });
     fill($('#ob-rows'), rows.length ? rows : el('tr', { class: 'ob-empty' }, el('td', { colspan: '5' }, 'No outbound attempts yet.')));
     fill($('#ob-run'), sid ? el('span', { class: 'mono' }, sid) : []);
@@ -430,7 +430,7 @@
   // The memo as a paper dossier: typewriter header, ink stamp, marker redactions (DESIGN.md "Materials").
   function dossier(sid, redact) {
     const s = session(sid);
-    const subject = s.title || '—';
+    const subject = s.title || 'n/a';
     return el('article', { class: 'paper', 'aria-label': 'Confidential memo' },
       el('p', { class: 'tw t-classic' }, 'FILE 1984', s.sha ? `  ·  SHA ${shortHash(s.sha)}` : ''),
       el('p', { class: 'tw t-classic' }, 'SUBJECT: ', redacted(subject, sid, !redact)),
@@ -458,7 +458,7 @@
         [el('span', { class: 'mono' }, d.need), el('span', { class: 'ichip' }, d.found ? 'Found' : 'Not found')])),
       el('div', { class: 'chips' }, (d.values || []).map((v) => el('div', { class: 'chip' },
         el('div', { class: 'chip-top' }, el('span', { class: 'chip-num' }, String(v.value)), el('span', { class: 'chip-unit' }, v.unit)),
-        el('div', { class: 'chip-foot' }, `${v.period || '—'} · ${v.result_id}`)))));
+        el('div', { class: 'chip-foot' }, `${v.period || 'n/a'} · ${v.result_id}`)))));
   }
 
   function renderTyped(sid) {
@@ -1183,8 +1183,8 @@
     setProofOpen(false);
     setEmptyRooms();
     fill($('#verdict'), el('p', { class: 'empty' }, 'Not verified yet. Press Verify proof.'));
-    $('#proof-head').textContent = '—';
-    $('#proof-rows').textContent = '—';
+    $('#proof-head').textContent = 'n/a';
+    $('#proof-rows').textContent = 'n/a';
     $('#proof-signer-row').hidden = true;
     $('#sheet').classList.remove('open');
     $('#exit').classList.remove('flash');
