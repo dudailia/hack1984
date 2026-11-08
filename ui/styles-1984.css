@@ -441,6 +441,7 @@ body.replay .live-only, body.live .replay-only { display: none !important; }
 .tag { display: inline-block; color: var(--text-muted); border: 1px solid var(--control-edge); padding: 0 var(--sp-2); margin-top: var(--sp-1); }
 .ledger li.blocked::before, .ledger li.leak::before, .ledger li.broken::before { opacity: 1; }
 .ledger li.broken .pslot { color: var(--red); font-weight: 700; }
+.ledger li.broken .mark.ok { display: none; }   /* a broken row shows only its failure, never the allowed check */
 .ledger li.p-ok .pslot { color: var(--calm); }
 .ledger li.tampered .tampered-tag { color: var(--red); border-color: var(--red); }
 
