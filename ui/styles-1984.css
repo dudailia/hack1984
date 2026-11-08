@@ -120,6 +120,22 @@ button, select, input {
 button:hover:not(:disabled) { border-color: var(--text); }
 button:disabled { cursor: default; color: var(--text-muted); border-color: var(--line); }
 button[aria-pressed="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+/* Run button loader (setRunBusy in app.js): a band slides across while a run is going.
+   Transform only, --ease; under prefers-reduced-motion the band stands still. */
+#run { position: relative; overflow: hidden; min-width: 7.5em; }
+#run.is-running { cursor: progress; }
+#run.is-running:disabled { color: var(--text); border-color: var(--text); }   /* not the dim disabled look */
+#run.is-running::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(90deg, transparent 0%, currentColor 50%, transparent 100%);
+  opacity: 0.22;
+  transform: translateX(-100%);
+  animation: run-band 1.4s var(--ease) infinite;
+}
+@keyframes run-band { to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) {
+  #run.is-running::after { animation: none; transform: none; opacity: 0.15; }
+}
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 input[type="number"] { width: 4.5rem; cursor: text; }
 input[type="checkbox"] { width: 1.1rem; height: 1.1rem; accent-color: var(--text); margin: 0; }

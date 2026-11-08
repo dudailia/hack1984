@@ -919,6 +919,7 @@
         m: { leaks: 0, blocked: 0, credits: 0, seconds: null } });
       S.current = sid;
       S.fakeDest = null;
+      setRunBusy(true);    // Run button loader on until this run's run_done
       clearWalk();
       clearFx();
       if (LIVE) hideTitle();
@@ -1080,6 +1081,7 @@
       s.done = d;
       s.m = { leaks: d.leaks, blocked: d.blocked, credits: d.credits_total, seconds: d.seconds };
       S.lastDone = env.session_id;
+      if (env.session_id === S.current) setRunBusy(false);   // the run the button is waiting for has finished
       renderCounters(env.session_id, false);
       renderAnswerBar(env.session_id);
       renderGateHead();
@@ -1179,6 +1181,7 @@
     const wasPlaying = R.playing;
     if (wasPlaying) pause();
     resetView();
+    setRunBusy(false);   // re-dispatching below turns it back on if the new position is mid-run
     R.i = 0;
     while (R.i < R.events.length && R.events[R.i].t_ms <= ms) dispatch(R.events[R.i++], { instant: true });
     R.base = ms;
@@ -1264,6 +1267,27 @@
 
   const targetSession = () => S.lastDone || S.current;
 
+  // ---------- Run button loader ----------
+  // POST /api/run only STARTS a run; the run ends when its run_done event arrives on /events (FORMATS §10, §11).
+  // So the button shows "running" from the click (and from any run_started, which also covers a page reload or SSE
+  // reconnect mid-run) until run_done. Live: the button is disabled meanwhile, since the app refuses a second run
+  // with 409. Replay: the band still shows while a scripted run plays, but the button stays clickable (Run restarts
+  // the replay). The moving band is CSS (#run.is-running::after), transform only, and still under reduced motion.
+  const RUN_WATCHDOG_MS = 10 * 60 * 1000;   // safety net if run_done never arrives (stream lost for good)
+  let runWatchdog = null;
+
+  function setRunBusy(on) {
+    const b = $('#run');
+    if (!b) return;
+    b.classList.toggle('is-running', on);
+    b.setAttribute('aria-busy', on ? 'true' : 'false');
+    b.textContent = on ? 'Running…' : 'Run';
+    b.disabled = LIVE && on;
+    clearTimeout(runWatchdog);
+    runWatchdog = null;
+    if (on && LIVE) runWatchdog = setTimeout(() => setRunBusy(false), RUN_WATCHDOG_MS);
+  }
+
   // ---------- controls ----------
   async function onRun() {
     hideTitle();
@@ -1274,10 +1298,17 @@
       source: single ? 'fake' : $('#source').value,
       plant_careless: single ? false : $('#careless').checked,
     };
+    setRunBusy(true);   // immediately on click, before the request returns
     try {
       const j = await api('/api/run', body);
       toast(`Run started: ${j && j.session_id ? j.session_id : body.mode}.`);
-    } catch (e) { toast(`Run failed: ${e.message}`); }
+    } catch (e) {
+      // If a run is already going (its run_started arrived, its run_done not yet), keep the loader: that run_done
+      // clears it. Otherwise this run never started, so clear the loader at once.
+      const cur = S.current && S.sessions[S.current];
+      if (!(cur && !cur.done)) setRunBusy(false);
+      toast(`Run failed: ${e.message}`);
+    }
   }
 
   async function onVerify() {
