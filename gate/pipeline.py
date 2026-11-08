@@ -140,16 +140,18 @@ class Pipeline:
         # 5. attempt row before any send; an exception here means nothing is sent
         attempt = self.ledger.append_attempt(session_id, component, kind, destination, payload, decision, rule)
         out = {"status": "blocked", "rule": rule, "detail": detail, "ledger_seq": attempt["seq"],
-               "rows": [attempt], "http_status": None, "response": None}
+               "rows": [attempt], "http_status": None, "response": None, "transport_error": None}
         if decision != "allowed":
             return out
 
         # 6. send exactly the committed bytes
-        http_status, response = None, b""
+        http_status, response, transport_error = None, b"", None
         try:
             http_status, response = self.transport(destination, path, payload, headers or {})
-        except Exception:
-            http_status, response = None, b""
+        except Exception as e:
+            # the exception TYPE only (e.g. SSLCertVerificationError, TimeoutError): its message can carry hosts,
+            # paths or worse, and it is never ledgered
+            http_status, response, transport_error = None, b"", type(e).__name__
         ok = http_status is not None and 200 <= http_status < 300
 
         credits = None
@@ -165,5 +167,5 @@ class Pipeline:
         result = self.ledger.append_result(session_id, attempt["seq"], "sent" if ok else "error",
                                            http_status, credits, response)
         out.update(status="sent" if ok else "error", rows=[attempt, result], http_status=http_status,
-                   response=response if ok else None)
+                   response=response if ok else None, transport_error=transport_error)
         return out

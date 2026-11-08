@@ -99,10 +99,16 @@ def _handler(gate):
             pass
 
         def log_request(self, code="-", size="-"):
-            sys.stderr.write(f"gate {self.command} {self.path.split('?')[0]} {code}\n")
+            note = getattr(self, "_note", "")
+            self._note = ""
+            sys.stderr.write(f"gate {self.command} {self.path.split('?')[0]} {code}{note}\n")
 
         def _send(self, status, obj):
             data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+            # an error reply's code and detail go on the log line (both Gate-written: fixed text, HTTP status,
+            # exception type; never keys, headers, payloads or response bodies)
+            if isinstance(obj, dict) and obj.get("status") == "error" and obj.get("error"):
+                self._note = f" {obj['error']}: {obj.get('detail')}"
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))

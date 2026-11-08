@@ -73,7 +73,10 @@ class Base(unittest.TestCase):
 
     def transport(self, dest, path, payload, headers):
         self.calls.append((dest, path, payload, dict(headers)))
-        return self.replies.pop(0)
+        reply = self.replies.pop(0)
+        if isinstance(reply, BaseException):
+            raise reply  # no response: SSL failure, timeout, refused connection
+        return reply
 
     def read(self, ids=("r_01", "r_02"), types=("revenue_growth", "market_size")):
         return read.read(self.pipe, self.sid, NEED, list(ids), list(types))
@@ -289,7 +292,7 @@ class TestReaderErrorFailsClosed(Base):
         self.assertIsNone(r["job"])
         self.keys = {"tavily": "tvly-K"}
         self.pipe = self.make_pipe()
-        with self.assertRaises(GateConfigError):
+        with self.assertRaises(ApiError):
             self.read()
         self.keys = {"tavily": "tvly-K", "anthropic": "sk-ant-K"}
         self.pipe = self.make_pipe()
@@ -344,14 +347,71 @@ class TestRefusals(Base):
         self.keys = {"tavily": "tvly-K"}
         self.pipe = self.make_pipe()
         n = len(self.led.rows(self.sid))
-        with self.assertRaises(GateConfigError):
+        with self.assertRaises(ApiError) as cm:
             self.read()
+        self.assertEqual((cm.exception.http, cm.exception.code, cm.exception.detail),
+                         (503, "reader_key_missing", "ANTHROPIC_API_KEY not set"))
         self.assertEqual(len(self.led.rows(self.sid)), n)
 
     def test_check_block_enforced(self):
         self.check = {"decision": "block", "rule": "secret.buyer", "detail": "d"}
         r = self.read()
         self.assertEqual((r["status"], r["rule"], r["detail"]), ("blocked", "secret.buyer", "d"))
+
+
+class TestReaderErrorReasons(Base):
+    """When /v1/read can't succeed, the reply says why: an "error" code and a human "detail", built only from
+    fixed text, the HTTP status and the exception type. Never keys, headers, payloads or response bodies."""
+
+    SECRETISH = ("sk-ant-K", "x-api-key", "invalid x-api-key", "authentication_error", "certificate verify failed",
+                 "zq9", "Margins held steady")
+    ROW_KEYS = {"attempt": {"seq", "time", "session_id", "row_type", "component", "kind", "destination",
+                            "commitment", "bytes", "decision", "rule", "prev_hash", "hash"},
+                "result": {"seq", "time", "session_id", "row_type", "attempt_seq", "status", "http_status",
+                           "credits_used", "response_commitment", "prev_hash", "hash"}}
+
+    def failed_read(self, reply):
+        self.replies = [reply]
+        r = self.read()
+        self.assertEqual(r["status"], "error")
+        self.assertEqual(r["typed"], {"need": NEED, "found": False, "values": []})
+        for row in r["ledger"]:
+            self.assertEqual(set(row), self.ROW_KEYS[row["row_type"]], "ledger rows keep their §7 shape")
+        blob = json.dumps(r)
+        for s in self.SECRETISH:
+            self.assertNotIn(s, blob)
+        return r
+
+    def test_auth_failed_401_and_403(self):
+        body = b'{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key sk-ant-K"}}'
+        for code in (401, 403):
+            with self.subTest(code=code):
+                r = self.failed_read((code, body))
+                self.assertEqual((r["error"], r["detail"]), ("reader_auth_failed", "Reader auth failed: %d" % code))
+                self.assertEqual(r["ledger"][1]["http_status"], code)
+
+    def test_unreachable_names_the_exception_type_only(self):
+        import ssl
+        for exc, name in ((ssl.SSLCertVerificationError(1, "certificate verify failed: sk-ant-K"),
+                           "SSLCertVerificationError"),
+                          (TimeoutError("timed out after sk-ant-K"), "TimeoutError"),
+                          (ConnectionRefusedError(111, "refused"), "ConnectionRefusedError")):
+            with self.subTest(name=name):
+                r = self.failed_read(exc)
+                self.assertEqual((r["error"], r["detail"]), ("reader_unreachable", "Reader unreachable: " + name))
+                self.assertIsNone(r["ledger"][1]["http_status"])
+
+    def test_other_http_failures_have_a_code_too(self):
+        for code in (429, 500, 529):
+            with self.subTest(code=code):
+                r = self.failed_read((code, b'{"type":"error","error":{"message":"zq9 overloaded"}}'))
+                self.assertEqual((r["error"], r["detail"]), ("reader_http_error", "Reader answered HTTP %d" % code))
+
+    def test_success_and_blocked_carry_no_error_code(self):
+        self.replies = [anthropic_reply([claim()])]
+        self.assertNotIn("error", self.read())
+        self.check = {"decision": "block", "rule": "secret.buyer", "detail": "d"}
+        self.assertNotIn("error", self.read())
 
 
 class TestTwoMindsFake(Base):

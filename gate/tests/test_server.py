@@ -347,12 +347,30 @@ class TestPartTwoEndpoints(unittest.TestCase):
         self.start()
         sid = self.setup_session()
         n = len(self.led.rows(sid))
-        st, b = self.jreq("POST", "/v1/read", self.read_body(sid))
-        self.assertEqual((st, b["status"], b["error"]), (500, "error", "gate_config"))
-        self.assertIn("ANTHROPIC_API_KEY", b["detail"])
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            st, b = self.jreq("POST", "/v1/read", self.read_body(sid))
+        self.assertEqual((st, b), (503, {"status": "error", "error": "reader_key_missing",
+                                         "detail": "ANTHROPIC_API_KEY not set"}))
+        self.assertIn("gate POST /v1/read 503 reader_key_missing: ANTHROPIC_API_KEY not set", err.getvalue())
         self.assertEqual(len(self.led.rows(sid)), n)
         st, b = self.jreq("GET", "/v1/health")
         self.assertEqual(st, 200, "server still up")
+
+    def test_read_failure_reason_in_reply_and_log_line(self):
+        sid = self.setup_session()
+        self.transport = lambda *a: (401, b'{"error":{"message":"invalid x-api-key sk-ant-K"}}')
+        self.srv.gate.pipeline.transport = self.transport
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            st, b = self.jreq("POST", "/v1/read", self.read_body(sid))
+        self.assertEqual((st, b["status"], b["error"], b["detail"]),
+                         (200, "error", "reader_auth_failed", "Reader auth failed: 401"))
+        log = err.getvalue()
+        self.assertIn("gate POST /v1/read 200 reader_auth_failed: Reader auth failed: 401", log)
+        for s in ("sk-ant-K", "x-api-key", "invalid"):
+            self.assertNotIn(s, log)
+            self.assertNotIn(s, json.dumps(b))
 
     def test_read_refused_in_single_agent(self):
         sid = self.setup_session("s_two000002", mode="single_agent", source="fake")
