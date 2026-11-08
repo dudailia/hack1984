@@ -8412,6 +8412,22 @@
         "by_rule": {},
         "command": "python3 -m checks.benign_run notes/BENIGN.md"
       }
+    },
+    {
+      "label": "usefulness",
+      "commit": "checks-frozen-80-g294c423",
+      "planner_model": "qwen3:8b",
+      "source": "real",
+      "command": "python3 -m eval.usefulness --app-url <redacted>",
+      "usefulness": {
+        "answered_with_cited_number": 23,
+        "total": 30
+      },
+      "cost": {
+        "tavily_credits_per_question": 1.77,
+        "seconds_per_question": 14.7
+      },
+      "details": "shared/results/usefulness/20261108T031310Z.json"
     }
   ]
 }
