@@ -81,7 +81,8 @@ body {
   line-height: 1.4;
   font-variant-numeric: tabular-nums;
   display: grid;
-  grid-template-rows: 3.5rem minmax(0, 1fr) 5.5rem;
+  /* header · step strip · rooms · footer */
+  grid-template-rows: 3.5rem auto minmax(0, 1fr) 5.5rem;
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -199,8 +200,17 @@ body.replay .live-only, body.live .replay-only { display: none !important; }
 .replay-status { color: var(--text-muted); white-space: nowrap; }
 .top > button { white-space: nowrap; }
 
+/* ---------- step strip (index.html #steps, app.js renderSteps) ----------
+   Greyscale only: red and cyan keep their meanings. The current step is inverted, like a pressed button. */
+.steps { grid-row: 2; grid-column: 1; padding: 0 var(--sp-4); border-bottom: 2px solid var(--line); min-width: 0; }
+.steps ol { display: flex; align-items: stretch; gap: var(--sp-2); white-space: nowrap; overflow: hidden; }
+.steps li { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-3); color: var(--text-dim); }
+.steps .step-n { font-weight: 700; }
+.steps li.done { color: var(--text-muted); }
+.steps li[aria-current="step"] { background: var(--text); color: var(--bg); font-weight: 700; }
+
 /* ---------- main grid: two rooms and a wall ---------- */
-.main { display: grid; min-height: 0; grid-row: 2; grid-column: 1; }
+.main { display: grid; min-height: 0; grid-row: 3; grid-column: 1; }
 .main.dt { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr); }
 .main.single { grid-template-columns: minmax(0, 2fr) minmax(0, 1.3fr); }
 
@@ -577,7 +587,7 @@ mark.planted {
 .cmd { margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--bg); border: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* ---------- footer: answer bar and big counters ---------- */
-.bottom { grid-row: 3; grid-column: 1; display: flex; align-items: stretch; border-top: 2px solid var(--line); min-width: 0; }
+.bottom { grid-row: 4; grid-column: 1; display: flex; align-items: stretch; border-top: 2px solid var(--line); min-width: 0; }
 .answer-bar {
   flex: 1 1 auto;
   min-width: 0;
@@ -616,9 +626,9 @@ mark.planted {
 
 /* ---------- overlays: answer sheet, results ---------- */
 .sheet, .results { grid-column: 1; z-index: 5; background: var(--bg); display: none; overflow-y: auto; min-height: 0; }
-.sheet { grid-row: 2; border-top: 4px solid var(--text); padding: var(--sp-5) var(--sp-6); }
+.sheet { grid-row: 3; border-top: 4px solid var(--text); padding: var(--sp-5) var(--sp-6); }
 .sheet.open { display: block; }
-.results { grid-row: 2 / 4; padding: var(--sp-5) var(--sp-7); }
+.results { grid-row: 2 / 5; padding: var(--sp-5) var(--sp-7); }
 .results.open { display: block; }
 
 .sheet-head { display: flex; align-items: baseline; gap: var(--sp-4); }

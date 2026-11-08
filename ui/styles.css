@@ -65,8 +65,8 @@ body {
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   display: grid;
-  /* header · rooms · Outbound strip · footer */
-  grid-template-rows: 3.5rem minmax(0, 1fr) auto 5.75rem;
+  /* header · step strip · rooms · Outbound strip · footer */
+  grid-template-rows: 3.5rem auto minmax(0, 1fr) auto 5.75rem;
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -179,8 +179,18 @@ kbd {
 .replay-status { color: var(--muted); white-space: nowrap; margin-right: var(--s1); }
 .top > button { white-space: nowrap; }
 
+/* ---------- step strip (index.html #steps, app.js renderSteps) ----------
+   Neutral ink only: red and green keep their meanings. The current step is bold with a filled badge. */
+.steps { grid-row: 2; grid-column: 1; padding: var(--s2) var(--s4) 0; min-width: 0; }
+.steps ol { display: flex; align-items: center; gap: var(--s3); white-space: nowrap; overflow: hidden; }
+.steps li { display: flex; align-items: center; gap: var(--s2); padding: 2px var(--s3) 2px 3px; border-radius: 999px; color: var(--muted); border: 1px solid transparent; }
+.steps .step-n { display: inline-grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 999px; border: 1px solid var(--border); background: var(--card); font-size: var(--fs-0); line-height: 1; }
+.steps li.done { color: var(--text-2); }
+.steps li[aria-current="step"] { color: var(--text); font-weight: 600; background: var(--card); border-color: var(--border); box-shadow: var(--shadow); }
+.steps li[aria-current="step"] .step-n { background: var(--text); border-color: var(--text); color: #FFFFFF; }
+
 /* ---------- main grid: three cards ---------- */
-.main { display: grid; gap: var(--s3); padding: var(--s3) var(--s3) 0; min-height: 0; grid-row: 2; grid-column: 1; }
+.main { display: grid; gap: var(--s3); padding: var(--s3) var(--s3) 0; min-height: 0; grid-row: 3; grid-column: 1; }
 .main.dt { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr); }
 .main.single { grid-template-columns: minmax(0, 2fr) minmax(0, 1.3fr); }
 
@@ -489,7 +499,7 @@ mark.planted {
 /* ---------- footer: answer and four stat tiles ---------- */
 /* ---------- Outbound strip: what left this device, from the ledger events (outbound.js) ---------- */
 .outbound {
-  grid-row: 3;
+  grid-row: 4;
   grid-column: 1;
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
@@ -540,7 +550,7 @@ mark.planted {
 .ob-check.no .ob-verdict { color: var(--green-text); }
 .ob-notes { color: var(--text-2); font-weight: 400; }
 
-.bottom { grid-row: 4; grid-column: 1; display: flex; align-items: stretch; gap: var(--s3); padding: var(--s3); min-width: 0; }
+.bottom { grid-row: 5; grid-column: 1; display: flex; align-items: stretch; gap: var(--s3); padding: var(--s3); min-width: 0; }
 .answer-bar {
   flex: 1 1 auto;
   min-width: 0;
@@ -579,7 +589,7 @@ mark.planted {
 /* ---------- overlays: answer sheet, results ---------- */
 .sheet, .results { grid-column: 1; z-index: 5; display: none; overflow-y: auto; min-height: 0; }
 .sheet {
-  grid-row: 2;
+  grid-row: 3;
   margin: var(--s3) var(--s3) 0;
   padding: var(--s5) var(--s6);
   background: var(--card);
@@ -588,7 +598,7 @@ mark.planted {
   box-shadow: 0 8px 24px rgba(0, 0, 0, .08);
 }
 .sheet.open { display: block; }
-.results { grid-row: 2 / 5; padding: var(--s5) var(--s6); background: var(--bg); }
+.results { grid-row: 2 / 6; padding: var(--s5) var(--s6); background: var(--bg); }
 .results.open { display: block; }
 
 .sheet-head { display: flex; align-items: baseline; gap: var(--s4); }

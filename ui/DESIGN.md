@@ -80,10 +80,29 @@ run on screen.
   counters and the red row (`T.leakStamp` and `T.blockStamp`), so it never gives the moment away early. It follows
   `S.view`, so during the proof beats it shows the verified run like the ledger, answer bar and counters.
 - **Layout at 1280x720:**
-  - The strip is 9.75rem tall, a full-width card in grid row 3; the footer moves to row 4 and the results screen
-    covers rows 2 to 4.
+  - The strip is 9.75rem tall, a full-width card in grid row 4 (below the step strip, section 0c); the footer is
+    row 5 and the results screen covers rows 2 to 5.
   - Text is 16px, with monospace for times and hosts.
   - The 1984 theme hides the strip (`.t-console`) and keeps its own layout.
+
+## 0c. Step strip (both themes)
+
+One line between the header and the rooms, so a judge always knows where the run is:
+`1 Drop in the memo · 2 Confirm flagged names and figures · 3 Ask a research question · 4 Cited answer + signed log`.
+
+- **Data:** existing events only, no new fields. `ui/runview.js` (pure, tested in `ui/tests/ui.test.html`) maps
+  `run_started` to step 1, `memo_loaded` to 2, `parties_confirmed` to 3, and `answer` to 4. Every other event keeps
+  the step, and a run never moves back. A run that ends without an answer (leaked, blocked, budget, error) stays on
+  step 3, so the strip never claims a cited answer the run did not give; the answer bar says how it ended.
+- **Which run:** it follows `S.view` like the ledger, so during the proof beats it shows the verified run (step 4).
+  Before any run nothing is highlighted.
+- **Marking:** the current item has `aria-current="step"`; earlier items have class `done`.
+  - Console: the current item is a white pill, bold, with a filled ink badge. Done items are --text-2, later items muted.
+  - 1984: the current item is inverted (text on --text, like a pressed button). Done items are --text-muted, later
+    items --text-dim.
+  - Neutral ink only: red and green (cyan) keep their meanings. No motion.
+- **Layout:** grid row 2 (`auto`, about 2.25rem). Console rows: header, steps, rooms, Outbound, footer. 1984 rows:
+  header, steps, rooms, footer. The answer sheet sits in row 3; the results screen covers the strip too.
 
 ## 1. Color
 

@@ -13,7 +13,7 @@ def read(name):
 
 class StaticPage(unittest.TestCase):
     def test_no_external_resources(self):
-        for name in ("index.html", "styles.css", "styles-1984.css", "app.js"):
+        for name in ("index.html", "styles.css", "styles-1984.css", "app.js", "outbound.js", "results.js", "runview.js"):
             text = read(name)
             # Only the SVG namespace URI is allowed (it is an identifier, never fetched).
             urls = [u for u in re.findall(r"https?://[^\s\"')]+", text) if not u.startswith("http://www.w3.org/2000/svg")]

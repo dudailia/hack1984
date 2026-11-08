@@ -6,6 +6,7 @@
 <link rel="icon" href="data:,">
 <script src="../outbound.js"></script>
 <script src="../results.js"></script>
+<script src="../runview.js"></script>
 </head>
 <body>
 <!-- Run by ui/tests/test_ui_browser.py through headless Edge and ui/preview.py. Results land in #result. -->
@@ -122,6 +123,60 @@
       ok('synthetic: provenance shown separately', has(check.text, 'provenance.rare_term'), check.text);
       ok('synthetic: gate block not counted as a secret block', !has(check.text, 'Blocked before sending'), check.text);
       ok('synthetic: time is HH:MM:SS', sum.attempts[0].time === '23:41:07', sum.attempts[0].time);
+    }
+
+    // ---------- step strip: the current step comes from existing events only (RunView.stepAfter) ----------
+    {
+      const V = window.RunView;
+      ok('runview.js loaded', V && typeof V.stepAfter === 'function' && Array.isArray(V.STEPS), 'window.RunView missing');
+      ok('four steps, in order', V.STEPS.length === 4 && V.STEPS[0] === 'Drop in the memo'
+        && V.STEPS[1] === 'Confirm flagged names and figures' && V.STEPS[2] === 'Ask a research question'
+        && V.STEPS[3] === 'Cited answer + signed log', JSON.stringify(V.STEPS));
+      const seq = ['run_started', 'memo_loaded', 'parties_confirmed', 'ledger_row', 'docs_read', 'reader_claims', 'planner_typed', 'answer', 'run_done', 'proof_result'];
+      const got = [];
+      let st = 0;
+      for (const t of seq) { st = V.stepAfter(t, st); got.push(st); }
+      ok('stepAfter follows the FORMATS §10 order', JSON.stringify(got) === JSON.stringify([1, 2, 3, 3, 3, 3, 3, 4, 4, 4]), JSON.stringify(got));
+      ok('stepAfter: run_done without an answer stays on step 3', V.stepAfter('run_done', 3) === 3, String(V.stepAfter('run_done', 3)));
+      ok('stepAfter: never moves back within a run', V.stepAfter('memo_loaded', 3) === 3, String(V.stepAfter('memo_loaded', 3)));
+      ok('stepAfter: unknown types keep the step', V.stepAfter('beat', 2) === 2 && V.stepAfter('nope', 0) === 0, 'changed');
+    }
+    {
+      const current = (doc) => {
+        const li = doc.querySelectorAll('#steps li[aria-current="step"]');
+        return li.length === 1 ? Number(li[0].dataset.step) : li.length === 0 ? 0 : -li.length;
+      };
+      for (const [at, want] of [[350, 1], [500, 2], [15000, 3], [22300, 3], [40350, 1], [46000, 3], [54500, 4], [88000, 3], [106500, 4]]) {
+        const doc = await load(`at=${at}&theme=console`);
+        ok(`step strip at ${at} ms shows step ${want}`, current(doc) === want, `got ${current(doc)}`);
+        const done = [...doc.querySelectorAll('#steps li.done')].map((li) => Number(li.dataset.step));
+        ok(`step strip at ${at} ms: earlier steps marked done`, JSON.stringify(done) === JSON.stringify([...Array(want - 1).keys()].map((i) => i + 1)), JSON.stringify(done));
+      }
+      for (const th of ['console', '1984']) {
+        const doc = await load(`at=46000&theme=${th}`);
+        const strip = doc.getElementById('steps');
+        const items = [...strip.querySelectorAll('li')];
+        const tops = new Set(items.map((li) => Math.round(li.getBoundingClientRect().top)));
+        ok(`step strip visible (${th})`, visible(doc, strip) && items.length === 4, `${items.length} items`);
+        ok(`step strip on one line, no overflow (${th})`, tops.size === 1 && strip.scrollWidth <= strip.clientWidth + 1
+          && items.every((li) => li.getClientRects().length === 1), `tops=${[...tops]} sw=${strip.scrollWidth} cw=${strip.clientWidth}`);
+        ok(`step strip labels (${th})`, items.map((li) => li.textContent.replace(/\s+/g, ' ').trim()).join('|')
+          === '1 Drop in the memo|2 Confirm flagged names and figures|3 Ask a research question|4 Cited answer + signed log',
+          items.map((li) => li.textContent).join('|'));
+        const r = strip.getBoundingClientRect();
+        const top = doc.querySelector('header.top').getBoundingClientRect();
+        const main = doc.getElementById('main').getBoundingClientRect();
+        ok(`step strip sits between the header and the rooms (${th})`, r.top >= top.bottom - 1 && r.bottom <= main.top + 1 && r.height <= 48, `${top.bottom} ${r.top}-${r.bottom} ${main.top}`);
+        ok(`page still fits 1280x720 with the strip (${th})`, doc.documentElement.scrollHeight <= 720 + 1, `${doc.documentElement.scrollHeight}`);
+        const red = items.filter((li) => /rgb\((2[0-5]\d|1[89]\d), (\d|[1-6]\d), (\d|[1-6]\d)\)/.test(doc.defaultView.getComputedStyle(li).color));
+        ok(`step strip uses no red (${th})`, red.length === 0, `${red.length} red items`);
+      }
+      const doc = await load('at=1&theme=console');
+      ok('step strip static before any run', current(doc) === 0 && doc.querySelectorAll('#steps li.done').length === 0, `got ${current(doc)}`);
+      const res = await load('at=125000&theme=console');
+      const rr = res.getElementById('results').getBoundingClientRect();
+      const sr = res.getElementById('steps').getBoundingClientRect();
+      ok('results screen covers the step strip', rr.top <= sr.top && rr.bottom >= sr.bottom, `${rr.top} vs ${sr.top}`);
     }
 
     // ---------- the Outbound panel in the page ----------

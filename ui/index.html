@@ -56,6 +56,16 @@
   <button type="button" id="verify" class="secondary" title="Key V">Verify proof</button>
 </header>
 
+<!-- Step strip: the run's current step comes from existing events only (ui/runview.js, app.js renderSteps). -->
+<nav id="steps" class="steps" aria-label="Run steps">
+  <ol>
+    <li data-step="1"><span class="step-n">1</span> <span class="step-label">Drop in the memo</span></li>
+    <li data-step="2"><span class="step-n">2</span> <span class="step-label">Confirm flagged names and figures</span></li>
+    <li data-step="3"><span class="step-n">3</span> <span class="step-label">Ask a research question</span></li>
+    <li data-step="4"><span class="step-n">4</span> <span class="step-label">Cited answer + signed log</span></li>
+  </ol>
+</nav>
+
 <main id="main" class="main dt">
 
   <section id="planner" class="room" aria-labelledby="planner-title">
@@ -199,6 +209,7 @@
 
 <script src="outbound.js"></script>
 <script src="results.js"></script>
+<script src="runview.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

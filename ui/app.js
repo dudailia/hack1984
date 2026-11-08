@@ -94,7 +94,7 @@
     if (!S.sessions[sid]) {
       S.sessions[sid] = {
         rows: [], typed: [], typedKeys: new Set(), urls: {}, secrets: [], secretsReady: false, canary: null, mode: null, source: null, careless: false,
-        memo: '', title: '', sha: '', answer: null, done: null,
+        memo: '', title: '', sha: '', answer: null, done: null, step: 0,
         m: { leaks: 0, blocked: 0, credits: 0, seconds: null },
       };
     }
@@ -382,8 +382,20 @@
     sc.scrollTop = sc.scrollHeight;   // the newest attempt is always in view
   }
 
-  // Everything that describes one run follows the ledger: answer bar, counters, badge, gate header, Outbound.
+  // ---------- step strip: the run's step from existing events only (ui/runview.js) ----------
+  function renderSteps(sid) {
+    if (sid !== S.view) return;
+    const step = sid && S.sessions[sid] ? S.sessions[sid].step : 0;
+    document.querySelectorAll('#steps li').forEach((li) => {
+      const n = Number(li.dataset.step);
+      li.classList.toggle('done', step > 0 && n < step);
+      if (n === step) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current');
+    });
+  }
+
+  // Everything that describes one run follows the ledger: answer bar, counters, badge, gate header, Outbound, steps.
   function showRunSummary(sid, animate = false) {
+    renderSteps(sid);
     renderAnswerBar(sid);
     renderOutbound(sid);
     renderCounters(sid, animate);
@@ -915,7 +927,7 @@
       const d = env.data;
       const sid = env.session_id;
       const s = session(sid);
-      Object.assign(s, { rows: [], typed: [], typedKeys: new Set(), urls: {}, mode: d.mode, source: d.source, careless: !!d.plant_careless, answer: null, done: null,
+      Object.assign(s, { rows: [], typed: [], typedKeys: new Set(), urls: {}, mode: d.mode, source: d.source, careless: !!d.plant_careless, answer: null, done: null, step: 0,
         m: { leaks: 0, blocked: 0, credits: 0, seconds: null } });
       S.current = sid;
       S.fakeDest = null;
@@ -1118,6 +1130,12 @@
     const h = handlers[env.type];
     if (!h) { console.warn('unknown event type', env.type, env); return; }
     try { h(env, o); } catch (e) { console.error('handler failed', env.type, e); }
+    // The step strip moves on event types the run already emits (run_started resets the step to 0 first).
+    if (env.session_id && window.RunView) {
+      const s = session(env.session_id);
+      const step = window.RunView.stepAfter(env.type, s.step);
+      if (step !== s.step) { s.step = step; renderSteps(env.session_id); }
+    }
   }
 
   // ---------- replay engine ----------
