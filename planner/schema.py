@@ -103,6 +103,30 @@ def validate_action(obj, known_ids=None) -> dict:
     return out
 
 
+# Preset safety net (qwen3:8b often answered extract + "general"). Only the preset is ever corrected, and only to a
+# value from the fixed lists above, so this can never let model or web text through.
+PRESETS = {"search": SEARCH_PRESETS, "extract": EXTRACT_PRESETS}
+DEFAULT_PRESET = {"search": "general", "extract": "text"}
+
+
+def normalize_preset(obj):
+    """Return (copy, corrected). For a search or extract whose `preset` key holds anything outside that action's
+    list, the copy gets the action's default preset. Nothing else changes: a missing preset is not added, an unknown
+    action or extra key is left for validate_action to reject, and the input is never mutated."""
+    if not isinstance(obj, dict):
+        return obj, False
+    action = obj.get("action")
+    # str check first: `[] in PRESETS` raises TypeError (unhashable), which next_action does not catch
+    if not isinstance(action, str) or action not in PRESETS or "preset" not in obj:
+        return dict(obj), False
+    preset = obj["preset"]
+    if isinstance(preset, str) and preset in PRESETS[action]:
+        return dict(obj), False
+    fixed = dict(obj)
+    fixed["preset"] = DEFAULT_PRESET[action]
+    return fixed, True
+
+
 def validate_typed(obj) -> dict:
     """Validate one §3 typed object; return a clean copy or raise SchemaError."""
     _keys(obj, _TYPED_KEYS, "typed")
@@ -135,20 +159,29 @@ def validate_typed_list(items) -> list:
     return [validate_typed(t) for t in items]
 
 
-# JSON schema for Ollama's `format`. Flat on purpose (small models follow flat grammars better);
-# validate_action enforces the per-action rules.
+# JSON schema for Ollama's `format`: one anyOf branch per action, each with its own preset list and exactly its own
+# keys, so the grammar cannot produce an extract with a search preset (the flat schema allowed any preset with any
+# action, and qwen3:8b chose extract + "general" every time when nudged). Checked on Ollama 0.40.15 with qwen3:8b:
+# the same nudge gives extract + "text" 5/5 with this schema, extract + "general" 5/5 with the old flat one.
+# validate_action still enforces every rule; normalize_preset stays as the safety net.
+_NEED = {"type": "string", "pattern": "^[a-z0-9_]{1,32}$"}
+_CLAIM_TYPES = {"type": "array", "minItems": 1, "items": {"type": "string", "enum": sorted(CLAIM_UNITS)}}
+
+
+def _branch(action, extra):
+    props = {"action": {"type": "string", "enum": [action]}, **extra}
+    return {"type": "object", "properties": props, "required": sorted(props), "additionalProperties": False}
+
+
 ACTION_JSON_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "action": {"type": "string", "enum": ["search", "extract", "done"]},
-        "need": {"type": "string", "pattern": "^[a-z0-9_]{1,32}$"},
-        "claim_types": {"type": "array", "minItems": 1,
-                        "items": {"type": "string", "enum": sorted(CLAIM_UNITS)}},
-        "query": {"type": "string", "maxLength": MAX_QUERY_CHARS},
-        "result_ids": {"type": "array", "minItems": 1, "maxItems": MAX_RESULT_IDS,
-                       "items": {"type": "string", "pattern": "^r_[0-9]{2}$"}},
-        "preset": {"type": "string", "enum": sorted(SEARCH_PRESETS | EXTRACT_PRESETS)},
-    },
-    "required": ["action"],
-    "additionalProperties": False,
+    "anyOf": [
+        _branch("search", {"need": _NEED, "claim_types": _CLAIM_TYPES,
+                           "query": {"type": "string", "maxLength": MAX_QUERY_CHARS},
+                           "preset": {"type": "string", "enum": sorted(SEARCH_PRESETS)}}),
+        _branch("extract", {"need": _NEED, "claim_types": _CLAIM_TYPES,
+                            "result_ids": {"type": "array", "minItems": 1, "maxItems": MAX_RESULT_IDS,
+                                           "items": {"type": "string", "pattern": "^r_[0-9]{2}$"}},
+                            "preset": {"type": "string", "enum": sorted(EXTRACT_PRESETS)}}),
+        _branch("done", {}),
+    ]
 }
