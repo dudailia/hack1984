@@ -280,6 +280,19 @@ class TestNormalizePreset(unittest.TestCase):
         for obj in ("text", ["list"], None, 3):
             self.assertEqual(schema.normalize_preset(obj), (obj, False))
 
+    def test_non_string_action_passes_through_to_schema_error(self):
+        # regression (PR #31): `action not in PRESETS` on an unhashable action raised TypeError, which next_action
+        # does not catch; on main this was a clean SchemaError
+        for action in ([], {}, ["search"], {"search": 1}, 3, 3.5, None, True):
+            for obj in ({"action": action}, {"action": action, "preset": "general"},
+                        with_(SEARCH, action=action), with_(EXTRACT, action=action, preset="general")):
+                with self.subTest(action=action, obj=obj):
+                    fixed, corrected = schema.normalize_preset(obj)
+                    self.assertEqual((fixed, corrected), (obj, False), "returned unchanged")
+                    self.assertIsNot(fixed, obj, "still a copy, never the input itself")
+                    with self.assertRaises(SchemaError):
+                        validate_action(fixed, known_ids={"r_04", "r_05"})
+
     def bad_known(self, obj, known_ids):
         with self.assertRaises(SchemaError):
             validate_action(obj, known_ids=known_ids)

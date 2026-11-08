@@ -59,6 +59,19 @@ class TestRetry(unittest.TestCase):
         self.assertEqual(run(m), SEARCH)
         self.assertEqual(len(m.calls), 1)
 
+    def test_non_string_action_gives_done_not_a_crash(self):
+        # regression (PR #31): {"action": []} raised TypeError out of normalize_preset and crashed next_action
+        for bad in ({"action": []}, {"action": {}}, {"action": [], "preset": "general"}, {"action": 3},
+                    {"action": None}):
+            with self.subTest(bad=bad):
+                m = FakeModel(bad, bad)
+                self.assertEqual(run(m), DONE)
+                self.assertEqual(len(m.calls), 2, "retried once, then done")
+
+    def test_non_string_action_then_valid_retry(self):
+        m = FakeModel({"action": {}}, SEARCH)
+        self.assertEqual(run(m), SEARCH)
+
     def test_invalid_then_valid(self):
         m = FakeModel("not json", SEARCH)
         self.assertEqual(run(m), SEARCH)

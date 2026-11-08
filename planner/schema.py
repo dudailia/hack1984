@@ -116,7 +116,8 @@ def normalize_preset(obj):
     if not isinstance(obj, dict):
         return obj, False
     action = obj.get("action")
-    if action not in PRESETS or "preset" not in obj:
+    # str check first: `[] in PRESETS` raises TypeError (unhashable), which next_action does not catch
+    if not isinstance(action, str) or action not in PRESETS or "preset" not in obj:
         return dict(obj), False
     preset = obj["preset"]
     if isinstance(preset, str) and preset in PRESETS[action]:
