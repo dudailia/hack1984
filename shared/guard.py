@@ -3,7 +3,7 @@
     from shared.guard import install_loopback_guard
     install_loopback_guard("app")   # or "planner", "baseline", "fake_tavily"; first thing at startup
 
-After install, in this process (behaviour of baseline/netguard.py, plus per-role port and program allowlists):
+After install, in this process (Python 3.13 and 3.14):
 - connect, bind, sendto and sendmsg to any non-loopback address raise PermissionError;
 - on loopback, only the role's ports are allowed (from the *_PORT keys of the repo .env):
       app          connect GATE_PORT, OLLAMA_PORT    bind APP_PORT
@@ -12,40 +12,43 @@ After install, in this process (behaviour of baseline/netguard.py, plus per-role
       fake_tavily  no connects                         bind FAKE_TAVILY_PORT
   any other loopback port, port 0 included, raises PermissionError;
 - DNS lookups for non-loopback names raise PermissionError ("localhost" and loopback literals are fine);
-- Unix sockets are refused: connect, bind and sendto on any path or abstract name raise PermissionError
-  (nothing in the project uses them). socket.socketpair() still works: an in-process pair reaches nothing,
-  and asyncio's event loop needs it;
-- ctypes is refused: every "ctypes.*" audit event raises PermissionError (dlopen, dlsym, call_function,
-  string_at, cdata, ...). `import ctypes` itself fires ctypes.dlopen, so ctypes cannot be imported after install,
-  and if it was imported before, none of it can be used;
-- starting a program raises PermissionError, except these exact argv lists, started through subprocess with
-  no shell, no cwd and no env, and only when the program actually run is the one fixed at install time:
-      app       [sys.executable, ("-I"), <repo>/proof/verify.py, BUNDLE, ("--json")]   (POST /api/verify)
-                the script path must be absolute; this one may also run with cwd=<repo>, as app/run.py does
-      baseline  ["git", "-C", <repo>, "rev-parse", "-q", "--verify", "refs/tags/checks-frozen"]
-                ["git", "-C", <repo>, "rev-parse", "--short", "HEAD"]                (baseline/redteam.py)
-  os.exec*, os.system, os.spawn* and os.startfile are always refused (subprocess never needs them), so a
-  preexec_fn, pty.spawn or multiprocessing child cannot start another program either;
+- Unix sockets are refused: connect, bind and sendto on any path or abstract name raise PermissionError.
+  socket.socketpair() still works: an in-process pair reaches nothing, and asyncio's event loop needs it;
+- no program can be started, by any role, with no exceptions: subprocess (and everything built on it: os.popen,
+  asyncio subprocesses, ...), os.system, os.exec*, os.spawn*, os.posix_spawn[p], os.fork, os.forkpty (pty),
+  multiprocessing (fork, spawn and forkserver) all raise PermissionError;
+- ctypes is refused: importing ctypes or _ctypes after install raises PermissionError, and every "ctypes.*" audit
+  event (dlopen, dlsym, call_function, string_at, cdata, ...) raises PermissionError;
 - one role per process: installing the same role again does nothing, a different role raises RuntimeError.
 The Gate never calls this: it is the one process allowed on the network.
 
-How the program check works: subprocess raises "subprocess.Popen" and then either "os.posix_spawn" (absolute
-executable) or "_posixsubprocess.fork_exec" (name looked up in PATH). Every one of these events is checked on
-its own against the fixed list: exact argv, env None, and the real path of the program that will run (the first
-existing PATH candidate for fork_exec) must equal the one resolved at install (git) or sys.executable as it
-was at install (verify). Nothing is remembered between events. All allowlists live in the hook's closure, so
-changing this module's variables, sys.executable or PATH after install changes nothing.
+How program starts are refused, per Python version:
+- Both: the audit events subprocess.Popen, os.system, os.exec, os.spawn, os.posix_spawn (also posix_spawnp),
+  os.startfile, os.fork and os.forkpty are refused.
+- 3.14 also raises _posixsubprocess.fork_exec, which is refused.
+- 3.13 raises no event inside _posixsubprocess.fork_exec, and multiprocessing's spawn and forkserver call it
+  directly (multiprocessing.util.spawnv_passfds). So at install the guard replaces _posixsubprocess.fork_exec, and
+  subprocess's private copy subprocess._fork_exec, with a function that raises PermissionError, and refuses any
+  later fresh import of _posixsubprocess (which would bring the original back). importlib.reload keeps the
+  replacement. subprocess and _posixsubprocess are imported by install so that later imports of them are cached.
+- ctypes on 3.13: ctypes/__init__.py catches OSError around its own dlopen at import, and PermissionError is an
+  OSError, so refusing ctypes.dlopen alone does not stop `import ctypes`; the import itself is refused instead.
+All policy lives in the hook's closure: changing this module's variables or sys.executable after install changes
+nothing.
 
 LIMITS, stated plainly:
 - This is a Python audit hook (PEP 578). It stops networking and program starts done through Python's own
-  socket, subprocess and os functions, which is all our code uses, and it refuses ctypes. It does NOT stop
-  native code that is already loaded: a C extension (or cffi module) imported before or after install can call
-  connect() or execve() directly without raising any audit event. Refusing ctypes closes the easy route from
-  pure Python to native calls, not that one.
+  socket, subprocess, os and multiprocessing functions, which is all our code uses, and it refuses ctypes. It
+  does NOT stop native code that is already loaded: a C extension (or cffi module) imported before or after
+  install can call connect(), fork() or execve() directly without raising any audit event.
+- ctypes imported BEFORE install: loading libraries, looking up symbols, reading memory and making new buffers
+  are refused on both versions, but on 3.13 calling a C function that was already resolved raises no audit event
+  and cannot be refused (3.14 raises ctypes.call_function for it, which is refused).
+- On 3.13, a reference to the original _posixsubprocess.fork_exec taken before install (for example
+  `from _posixsubprocess import fork_exec` in code that ran earlier) is not covered; on 3.14 the audit event
+  covers every call.
 - A file descriptor inherited from the parent, or a socket made with socket.socket(fileno=...)/fromfd from one,
   is already connected and needs no connect event.
-- The allowed child programs are not guarded themselves: proof/verify.py runs as a separate, unguarded
-  Python process (it uses only the standard library and cryptography); git runs as itself.
 - A loopback service that fetches for you is outside the guard: Ollama on OLLAMA_PORT can be asked to pull a
   model from a registry.
 - An audit hook cannot be removed, but code in the same process can still crash or exit the process.
@@ -53,14 +56,12 @@ The macOS/Linux OS sandbox (stretch goal) is what would make this hold against n
 """
 import ipaddress
 import os
-import shutil
 import socket
 import sys
 import threading
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_ENV = os.path.join(REPO, ".env")
-VERIFY = os.path.join(REPO, "proof", "verify.py")
 
 ROLES = {
     #               connect ports                     bind ports
@@ -69,14 +70,15 @@ ROLES = {
     "baseline":    (("GATE_PORT", "OLLAMA_PORT"),     ()),
     "fake_tavily": ((),                               ("FAKE_TAVILY_PORT",)),
 }
-GIT_ARGVS = (
-    ("git", "-C", REPO, "rev-parse", "-q", "--verify", "refs/tags/checks-frozen"),
-    ("git", "-C", REPO, "rev-parse", "--short", "HEAD"),
-)
 
 _CONNECT_EVENTS = ("socket.connect", "socket.sendto", "socket.sendmsg")
 _NAME_EVENTS = ("socket.getaddrinfo", "socket.gethostbyname", "socket.gethostbyname_ex", "socket.gethostbyaddr")
-_ALWAYS_DENIED = ("os.exec", "os.system", "os.spawn", "os.startfile")
+# Every audit event that starts a program, on 3.13 or 3.14. All refused, for every role.
+_PROGRAM_EVENTS = frozenset(("subprocess.Popen", "os.system", "os.exec", "os.spawn", "os.posix_spawn",
+                             "os.startfile", "os.fork", "os.forkpty", "_posixsubprocess.fork_exec"))
+# Fresh imports refused after install: ctypes (3.13 swallows a refused dlopen at import) and _posixsubprocess
+# (a fresh copy would bring back the fork_exec the guard replaced).
+_REFUSED_IMPORTS = frozenset(("ctypes", "_ctypes", "_posixsubprocess"))
 
 _lock = threading.Lock()
 _installed = {"role": None}  # bookkeeping for idempotence only; the hook never reads module state
@@ -127,9 +129,8 @@ def is_loopback(host):
 
 def _make_hook(role, connect_ports, bind_ports):
     af_unix = getattr(socket, "AF_UNIX", object())
-    realpath, isabs, isfile, access, X_OK = os.path.realpath, os.path.isabs, os.path.isfile, os.access, os.X_OK
-    fsdecode = os.fsdecode
     ip_address = ipaddress.ip_address  # captured: patching ipaddress or this module later changes nothing
+    program_events, refused_imports = _PROGRAM_EVENTS, _REFUSED_IMPORTS
 
     def is_loopback(host):  # private copy of the module-level is_loopback, bound to the captured functions
         if host is None:
@@ -146,39 +147,8 @@ def _make_hook(role, connect_ports, bind_ports):
         mapped = getattr(ip, "ipv4_mapped", None)
         return (mapped or ip).is_loopback
 
-    # programs: argv -> real path of the program that must run for it
-    allowed = {}
-    if role == "baseline":
-        git = shutil.which("git")
-        if git:
-            for argv in GIT_ARGVS:
-                allowed[tuple(argv)] = realpath(git)
-    exe = sys.executable
-    exe_real = realpath(exe) if exe else None
-    verify = VERIFY
-    repo_real = realpath(REPO)
-    fspath = os.fspath
-
     def deny(what):
         raise PermissionError("guard(%s): %s is not allowed outside the Gate (invariant 1)" % (role, what))
-
-    def program_for(argv):
-        """Real path the argv must run, or None if the argv is not allowed for this role."""
-        if not isinstance(argv, (list, tuple)) or not argv or not all(isinstance(a, str) for a in argv):
-            return None
-        argv = tuple(argv)
-        if argv in allowed:
-            return allowed[argv]
-        if role == "app" and exe and argv[0] == exe:
-            rest = argv[1:]
-            if rest[:1] == ("-I",):
-                rest = rest[1:]
-            if rest[:1] == (verify,):
-                args = rest[1:]
-                if (len(args) in (1, 2) and args[0] and not args[0].startswith("-")
-                        and (len(args) == 1 or args[1] == "--json")):
-                    return exe_real
-        return None
 
     def check_address(event, sock, address):
         if address is None:
@@ -193,46 +163,16 @@ def _make_hook(role, connect_ports, bind_ports):
         if port not in (bind_ports if event == "socket.bind" else connect_ports):
             deny("%s to loopback port %r" % (event, port))
 
-    def cwd_ok(cwd):
-        """No cwd, or (app verify only) cwd == the repo root, as app/run.py passes it. The verify argv names the
-        script by absolute path, so the cwd cannot change which file runs; relative script paths are refused
-        because the low-level fork_exec event does not carry the cwd."""
-        if cwd is None:
-            return True
-        if role != "app":
-            return False
-        try:
-            return realpath(fsdecode(fspath(cwd))) == repo_real
-        except TypeError:
-            return False
-
-    def check_popen(executable, args, cwd, env):
-        want = program_for(args)
-        if want is None or not cwd_ok(cwd) or env is not None or executable != args[0]:
-            deny("starting %r" % (args[0] if isinstance(args, (list, tuple)) and args else args))
-
-    def check_posix_spawn(path, argv, env):
-        want = program_for(argv)
-        path = fsdecode(path) if isinstance(path, (str, bytes)) else None
-        if want is None or env is not None or not path or not isabs(path) or realpath(path) != want:
-            deny("os.posix_spawn")
-
-    def check_fork_exec(executables, argv, env):
-        want = program_for(argv)
-        if want is None or env is not None or not isinstance(executables, (list, tuple)):
-            deny("starting a program")
-        for cand in executables:  # exec tries these in order: the first that can run is what runs
-            c = fsdecode(cand)
-            if isfile(c) and access(c, X_OK):
-                if realpath(c) != want:
-                    deny("starting %r" % c)
-                return
-        deny("starting a program")
-
     def hook(event, args):
+        if event in program_events:
+            deny("starting a program (%s)" % event)
         if event.startswith("ctypes."):
-            deny(event)  # dlopen (also fired by `import ctypes`), dlsym, call_function, string_at, cdata, ...
-        if event == "socket.bind" or event in _CONNECT_EVENTS:
+            deny(event)  # dlopen, dlsym, call_function (3.14), string_at, cdata, ...
+        if event == "import":
+            name = args[0] if args and isinstance(args[0], str) else ""
+            if name in refused_imports or name.startswith("ctypes."):
+                deny("importing %s" % name)
+        elif event == "socket.bind" or event in _CONNECT_EVENTS:
             check_address(event, args[0], args[1] if len(args) > 1 else None)
         elif event in _NAME_EVENTS:
             if not is_loopback(args[0]):
@@ -241,16 +181,23 @@ def _make_hook(role, connect_ports, bind_ports):
             sockaddr = args[0]
             if not is_loopback(sockaddr[0] if isinstance(sockaddr, tuple) else sockaddr):
                 deny("socket.getnameinfo")
-        elif event == "subprocess.Popen":
-            check_popen(*args[:4])
-        elif event == "os.posix_spawn":
-            check_posix_spawn(*args[:3])
-        elif event == "_posixsubprocess.fork_exec":
-            check_fork_exec(*args[:3])
-        elif event in _ALWAYS_DENIED:
-            deny(event)
 
     return hook
+
+
+def _disable_fork_exec(role):
+    """3.13 raises no audit event inside _posixsubprocess.fork_exec, which multiprocessing calls directly. Replace
+    it (and subprocess's private copy) with a function that refuses. Harmless on 3.14, which audits it anyway."""
+    import _posixsubprocess
+    import subprocess
+
+    def fork_exec(*args, **kwargs):
+        raise PermissionError("guard(%s): starting a program (_posixsubprocess.fork_exec) is not allowed outside "
+                              "the Gate (invariant 1)" % role)
+
+    _posixsubprocess.fork_exec = fork_exec
+    if hasattr(subprocess, "_fork_exec"):
+        subprocess._fork_exec = fork_exec
 
 
 def install_loopback_guard(role, env_path=DEFAULT_ENV):
@@ -267,6 +214,7 @@ def install_loopback_guard(role, env_path=DEFAULT_ENV):
         missing = [k for k in connect_keys + bind_keys if k not in ports]
         if missing:
             raise ValueError("guard: .env is missing %s" % ", ".join(missing))
+        _disable_fork_exec(role)  # before the hook, while importing _posixsubprocess is still allowed
         sys.addaudithook(_make_hook(role, frozenset(ports[k] for k in connect_keys),
                                     frozenset(ports[k] for k in bind_keys)))
         _installed["role"] = role

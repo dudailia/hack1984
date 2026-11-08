@@ -14,13 +14,13 @@ in the memo that the public web has not shown.
 |---|---|
 | Secret written into a search query | Planner never reads attacker text; gate checks 2 and 3 as a second layer |
 | Secret encoded (base64, hex, reversed, spaced, translated, number words) | Reader cannot leak what it never saw; gate normalises encodings for confirmed secrets |
-| Secret split across several queries | Provenance check runs over the whole session |
+| Secret split across several queries | Fragments adjacent across queries are caught session-wide; fragments separated by other words are a stated limit (see below) |
 | Secret placed in a URL for extract (attacker server logs it) | Planner can only pass result ids from this session, never URLs |
 | Reader output carrying instructions to the Planner | Planner receives only numbers and enums; free text is dropped |
 | Reader inventing numbers | Validator requires a verbatim quote that contains the number |
 | Choosing which result to read as a covert signal | Possible, very low bandwidth, and the Reader has nothing secret to signal. Stated as a limit |
 | The hosted model provider | Only the Reader may use a hosted model, and it only sees public text |
-| Bypassing the gate | Only the gate process may open network connections (audit hook; macOS sandbox as stretch) |
+| Bypassing the gate | Non-Gate processes run an in-process audit hook that refuses outside connections and program starts (a tripwire, not a sandbox; macOS sandbox as stretch) |
 
 ## What we claim (only what we measure)
 - Every outbound attempt is in the ledger, written before sending.
@@ -35,6 +35,8 @@ in the memo that the public web has not shown.
 - **Self-attested record.** The ledger proves what this install logged, not what code ran.
 - **The target is named** when you research it.
 - **A compromised laptop** is out of scope.
+- **The loopback guard is a tripwire, not a sandbox.** It is an in-process Python audit hook. It cannot stop native code (C extensions, or ctypes imported before the guard is installed), it does not cover Ollama's own network access, and it relies on the Python runtime raising audit events.
+- **Split secrets are caught only when the fragments are adjacent across queries.** Fragments separated by other words (e.g. "Oss payments", then "ory payments") pass the checks. The defence against a deliberate split is architectural: the component that reads attacker text cannot send queries and never sees the secret.
 
 ## Prior art (credit it on stage and in the README)
 - Willison, Dual LLM pattern (April 2023).

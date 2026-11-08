@@ -12,9 +12,9 @@ import sys
 import unittest
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-GIT_TAG = ["git", "-C", REPO, "rev-parse", "-q", "--verify", "refs/tags/checks-frozen"]
-GIT_HEAD = ["git", "-C", REPO, "rev-parse", "--short", "HEAD"]
-VERIFY = os.path.join(REPO, "proof", "verify.py")
+# Python 3.13 raises no audit event when an already-resolved ctypes function is called (3.14 added
+# ctypes.call_function to those calls), so that one case is a documented limit there.
+CTYPES_CALLS_AUDITED = sys.version_info >= (3, 14)
 
 PRELUDE = r'''
 import json, os, socket, subprocess, sys, tempfile, urllib.error, urllib.request
@@ -244,24 +244,45 @@ attempt("import", lambda: __import__("ctypes"))
                 r = run_child("ROLE = %r\n" % role + body)
                 self.assertEqual(r, {"preloaded": False, "import": "denied"})
 
-    def test_already_imported_ctypes_cannot_be_used(self):
+    def test_import_of_ctypes_parts_refused(self):
+        # 3.13's ctypes catches OSError (PermissionError included) around its own dlopen at import, so the
+        # import itself must be refused, for the package, its submodules and the _ctypes extension
         r = run_child('''
+attempt("ctypes_util", lambda: __import__("ctypes.util"))
+attempt("_ctypes", lambda: __import__("_ctypes"))
+attempt("importlib", lambda: __import__("importlib").import_module("ctypes"))
+R["in_modules"] = "ctypes" in sys.modules or "_ctypes" in sys.modules
+''', role="planner")
+        self.assertEqual(r, {"ctypes_util": "denied", "_ctypes": "denied", "importlib": "denied",
+                             "in_modules": False})
+
+    PRE_IMPORTED = '''
 import ctypes
 libc = ctypes.CDLL(None)
 getpid = libc.getpid                          # symbol resolved before the guard
 buf = ctypes.create_string_buffer(8)
 guard.install_loopback_guard("baseline", env_path=ENV)
-attempt("call_resolved", lambda: getpid())
+'''
+
+    def test_already_imported_ctypes_cannot_load_or_read(self):
+        r = run_child(self.PRE_IMPORTED + '''
 attempt("dlopen", lambda: ctypes.CDLL(None))
 attempt("dlsym", lambda: libc.connect)
 attempt("string_at", lambda: ctypes.string_at(ctypes.addressof(buf), 1))
-attempt("memmove", lambda: ctypes.memmove(buf, b"ab", 2))
 attempt("new_buffer", lambda: ctypes.create_string_buffer(4))
 attempt("pythonapi", lambda: ctypes.pythonapi.Py_IsInitialized())
+''')
+        self.assertEqual(set(r.values()), {"denied"}, r)
+
+    @unittest.skipUnless(CTYPES_CALLS_AUDITED,
+                         "documented limit: ctypes imported before install can't be blocked on 3.13")
+    def test_already_imported_ctypes_calls_refused(self):
+        r = run_child(self.PRE_IMPORTED + '''
+attempt("call_resolved", lambda: getpid())
+attempt("memmove", lambda: ctypes.memmove(buf, b"ab", 2))
 attempt("cast_obj", lambda: ctypes.cast(id(R), ctypes.py_object).value)
 ''')
-        for k, v in r.items():
-            self.assertEqual(v, "denied", k)
+        self.assertEqual(set(r.values()), {"denied"}, r)
 
 
 class TestProxies(unittest.TestCase):
@@ -291,128 +312,106 @@ os.environ["no_proxy"] = ""
 
 
 class TestPrograms(unittest.TestCase):
-    COMMON = '''
-attempt("run_true", lambda: subprocess.run(["true"]))
-attempt("system", lambda: os.system("true"))
-attempt("shell", lambda: subprocess.run("true", shell=True))
-attempt("posix_spawn", lambda: os.posix_spawn("/bin/true", ["true"], dict(os.environ)))
-attempt("execv", lambda: os.execv("/bin/true", ["true"]))
-attempt("python_other", lambda: subprocess.run([sys.executable, "-c", "pass"]))
+    """No role may start any program: no allowlisted argv, no cwd exceptions. Each attempt would create MARK if
+    it ran, so a child that slipped through is caught even if no exception says so."""
+
+    BODY = r'''
+import multiprocessing, multiprocessing.util, pty, asyncio, time
+MARK = os.path.join(TMP, "pwned")
+TOUCH = ["touch", MARK]
+
+def fork_child(fork):
+    def go():
+        pid = fork()
+        pid = pid[0] if isinstance(pid, tuple) else pid
+        if pid == 0:
+            open(MARK, "w").close()
+            os._exit(0)
+        os.waitpid(pid, 0)
+    return go
+
+def mp(method):
+    def go():
+        p = multiprocessing.get_context(method).Process(target=os.getpid)
+        p.start(); p.join(5)
+    return go
+
+fake = os.path.join(TMP, "git")
+with open(fake, "w") as f:
+    f.write("#!/bin/sh\ntouch " + MARK + "\n")
+os.chmod(fake, 0o755)
+
+attempt("subprocess_name", lambda: subprocess.run(TOUCH))
+attempt("subprocess_abs", lambda: subprocess.run(["/bin/touch", MARK], capture_output=True))
+attempt("subprocess_shell", lambda: subprocess.run("touch " + MARK, shell=True))
+attempt("subprocess_cwd", lambda: subprocess.run(TOUCH, cwd=REPO))
+attempt("python_verify", lambda: subprocess.run([sys.executable, os.path.join(REPO, "proof", "verify.py"), "b",
+                                                 "--json"], cwd=REPO, capture_output=True))
+attempt("git_rev_parse", lambda: subprocess.run(["git", "-C", REPO, "rev-parse", "--short", "HEAD"],
+                                                capture_output=True))
+attempt("check_output", lambda: subprocess.check_output([sys.executable, "-c", "pass"]))
+attempt("os_popen", lambda: os.popen("touch " + MARK).close())
+attempt("os_system", lambda: os.system("touch " + MARK))
+attempt("posix_spawn", lambda: os.posix_spawn("/bin/touch", TOUCH, dict(os.environ)))
+attempt("posix_spawnp", lambda: os.posix_spawnp("touch", TOUCH, dict(os.environ)))
+attempt("execv", lambda: os.execv("/bin/touch", TOUCH))
+attempt("execvp", lambda: os.execvp("touch", TOUCH))
+attempt("spawnv", lambda: os.spawnv(os.P_WAIT, "/bin/touch", TOUCH))
+attempt("os_fork", fork_child(os.fork))
+attempt("os_forkpty", fork_child(os.forkpty))
+attempt("pty_fork", fork_child(pty.fork))
+attempt("pty_spawn", lambda: pty.spawn(["/bin/touch", MARK]))
+attempt("mp_spawn", mp("spawn"))
+attempt("mp_forkserver", mp("forkserver"))
+attempt("mp_fork", mp("fork"))
+attempt("spawnv_passfds", lambda: multiprocessing.util.spawnv_passfds("/bin/touch", TOUCH, []))
+attempt("asyncio_exec", lambda: asyncio.run(asyncio.create_subprocess_exec("/bin/touch", MARK)))
+os.environ["PATH"] = TMP + os.pathsep + os.environ.get("PATH", "")
+attempt("fake_git_on_path", lambda: subprocess.run(["git", "--version"], capture_output=True))
+time.sleep(0.3)
+R["pwned"] = os.path.exists(MARK)
 '''
 
-    def test_programs_blocked_for_every_role(self):
+    def test_every_program_start_refused_for_every_role(self):
         for role in ("app", "planner", "baseline", "fake_tavily"):
             with self.subTest(role=role):
-                r = run_child(self.COMMON, role=role)
-                self.assertEqual(set(r.values()), {"denied"}, r)
+                r = run_child(self.BODY, role=role)
+                pwned = r.pop("pwned")
+                self.assertEqual({k: v for k, v in r.items() if v != "denied"}, {}, "not refused")
+                self.assertFalse(pwned, "a program ran")
 
-    def test_baseline_exact_git_argv(self):
-        body = '''
-GIT_TAG = %r
-GIT_HEAD = %r
-attempt("tag", lambda: subprocess.run(GIT_TAG, capture_output=True, timeout=20))
-attempt("head", lambda: subprocess.run(GIT_HEAD, capture_output=True, timeout=20))
-attempt("tag_check_call", lambda: subprocess.call(GIT_TAG, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
-attempt("status", lambda: subprocess.run(["git", "-C", REPO, "status"], capture_output=True))
-attempt("extra_arg", lambda: subprocess.run(GIT_HEAD + ["--all"], capture_output=True))
-attempt("other_repo", lambda: subprocess.run(["git", "-C", "/tmp"] + GIT_HEAD[3:], capture_output=True))
-attempt("other_tag", lambda: subprocess.run(GIT_TAG[:-1] + ["refs/tags/v1"], capture_output=True))
-attempt("with_cwd", lambda: subprocess.run(GIT_HEAD, capture_output=True, cwd="/tmp"))
-attempt("with_env", lambda: subprocess.run(GIT_HEAD, capture_output=True, env={"GIT_DIR": "/tmp"}))
-attempt("shell_git", lambda: subprocess.run(" ".join(GIT_HEAD), shell=True, capture_output=True))
-attempt("executable_swap", lambda: subprocess.run(GIT_HEAD, executable="/bin/sh", capture_output=True))
-attempt("posix_spawn_git", lambda: os.posix_spawn("/usr/bin/git", GIT_HEAD, dict(os.environ)))
-''' % (GIT_TAG, GIT_HEAD)
-        r = run_child(body, role="baseline")
-        self.assertEqual((r["tag"], r["head"], r["tag_check_call"]), ("ok", "ok", "ok"))
-        for k in ("status", "extra_arg", "other_repo", "other_tag", "with_cwd", "with_env", "shell_git",
-                  "executable_swap", "posix_spawn_git"):
-            self.assertEqual(r[k], "denied", k)
+    def test_fork_exec_cannot_be_restored(self):
+        """3.13 has no audit event in _posixsubprocess.fork_exec: the guard replaces it at install. A fresh import
+        (which would bring the original back) is refused; a reload keeps the replacement."""
+        r = run_child(r'''
+import importlib, multiprocessing.util, _posixsubprocess
+MARK = os.path.join(TMP, "pwned")
+attempt("reload", lambda: importlib.reload(_posixsubprocess))
+attempt("after_reload", lambda: multiprocessing.util.spawnv_passfds("/bin/touch", ["touch", MARK], []))
+def fresh():
+    del sys.modules["_posixsubprocess"]
+    import _posixsubprocess as again
+    again.fork_exec
+attempt("fresh_import", fresh)
+attempt("after_fresh", lambda: multiprocessing.util.spawnv_passfds("/bin/touch", ["touch", MARK], []))
+attempt("subprocess_private", lambda: subprocess._fork_exec())
+R["pwned"] = os.path.exists(MARK)
+''', role="baseline")
+        self.assertEqual(r.pop("pwned"), False)
+        self.assertEqual(r.pop("reload"), "ok", "reload is harmless: it keeps the replacement")
+        self.assertEqual(set(r.values()), {"denied"}, r)
 
-    def test_git_head_output_is_real(self):
+    def test_stdlib_that_imports_subprocess_still_loads(self):
         r = run_child('''
-GIT_HEAD = %r
-out = subprocess.run(GIT_HEAD, capture_output=True, text=True, timeout=20)
-R["head"] = out.stdout.strip()
-''' % GIT_HEAD, role="baseline")
-        self.assertRegex(r["head"], r"^[0-9a-f]{4,40}$")
-
-    def test_git_denied_for_other_roles(self):
-        for role in ("app", "planner", "fake_tavily"):
-            with self.subTest(role=role):
-                r = run_child('attempt("tag", lambda: subprocess.run(%r, capture_output=True))\n' % GIT_TAG,
-                              role=role)
-                self.assertEqual(r, {"tag": "denied"})
-
-    def test_app_exact_verify_argv(self):
-        body = '''
-VERIFY = %r
-B = os.path.join(TMP, "b.json")
-open(B, "w").write("{}")
-def run(argv):
-    return lambda: subprocess.run(argv, capture_output=True, timeout=60)
-attempt("plain", run([sys.executable, VERIFY, B]))
-attempt("json", run([sys.executable, VERIFY, B, "--json"]))
-attempt("isolated", run([sys.executable, "-I", VERIFY, B, "--json"]))
-attempt("no_bundle", run([sys.executable, VERIFY]))
-attempt("two_bundles", run([sys.executable, VERIFY, B, B]))
-attempt("flag_as_bundle", run([sys.executable, VERIFY, "--help"]))
-attempt("other_flag", run([sys.executable, VERIFY, B, "--tamper"]))
-attempt("other_script", run([sys.executable, os.path.join(REPO, "proof", "export.py"), B]))
-attempt("copied_script", run([sys.executable, os.path.join(TMP, "verify.py"), B]))
-attempt("other_python", run(["python3", VERIFY, B]))
-attempt("dash_c", run([sys.executable, "-c", "pass", VERIFY, B]))
-attempt("with_cwd", lambda: subprocess.run([sys.executable, VERIFY, B], capture_output=True, cwd="/tmp"))
-attempt("with_env", lambda: subprocess.run([sys.executable, VERIFY, B], capture_output=True, env={}))
-out = subprocess.run([sys.executable, VERIFY, B, "--json"], capture_output=True, text=True, timeout=60)
-R["verify_ran"] = bool(out.stdout.strip()) and out.returncode in (0, 1)
-''' % VERIFY
-        r = run_child(body, role="app")
-        for k in ("plain", "json", "isolated"):
-            self.assertEqual(r[k], "ok", k)
-        for k in ("no_bundle", "two_bundles", "flag_as_bundle", "other_flag", "other_script", "copied_script",
-                  "other_python", "dash_c", "with_cwd", "with_env"):
-            self.assertEqual(r[k], "denied", k)
-        self.assertTrue(r["verify_ran"], "the real proof/verify.py ran and printed a verdict")
-
-    def test_app_run_py_verify_call_exactly(self):
-        """app/run.py (main): subprocess.run([sys.executable, <abs>/proof/verify.py, path, "--json"],
-        capture_output=True, timeout=30, cwd=<repo>)."""
-        r = run_child('''
-VERIFY = %r
-B = os.path.join(TMP, "b.json")
-open(B, "w").write("{}")
-def run_py_call():
-    out = subprocess.run([sys.executable, VERIFY, B, "--json"], capture_output=True, timeout=30, cwd=REPO)
-    R["out"] = out.stdout.decode().strip().splitlines()[-1] if out.stdout.strip() else ""
-attempt("run_py", run_py_call)
-attempt("cwd_repo_symlink_free", lambda: subprocess.run([sys.executable, VERIFY, B], capture_output=True,
-                                                          cwd=os.path.realpath(REPO)))
-attempt("relative_cwd_repo", lambda: subprocess.run([sys.executable, "proof/verify.py", B, "--json"],
-                                                      capture_output=True, cwd=REPO))
-attempt("relative_no_cwd", lambda: subprocess.run([sys.executable, "proof/verify.py", B, "--json"],
-                                                    capture_output=True))
-attempt("cwd_elsewhere", lambda: subprocess.run([sys.executable, VERIFY, B, "--json"], capture_output=True,
-                                                  cwd=TMP))
-attempt("cwd_repo_other_script", lambda: subprocess.run([sys.executable, os.path.join(REPO, "proof", "export.py"),
-                                                         B], capture_output=True, cwd=REPO))
-''' % VERIFY, role="app")
-        self.assertEqual(r["run_py"], "ok")
-        self.assertIn('"valid"', r["out"], "the real verifier ran and printed its --json result")
-        self.assertEqual(r["cwd_repo_symlink_free"], "ok")
-        for k in ("relative_cwd_repo", "relative_no_cwd", "cwd_elsewhere", "cwd_repo_other_script"):
-            self.assertEqual(r[k], "denied", k)
-
-    def test_verify_denied_for_other_roles(self):
-        for role in ("planner", "baseline", "fake_tavily"):
-            with self.subTest(role=role):
-                r = run_child('attempt("v", lambda: subprocess.run([sys.executable, %r, "b.json"]))\n' % VERIFY,
-                              role=role)
-                self.assertEqual(r, {"v": "denied"})
+for name in ("platform", "uuid", "webbrowser", "http.server", "shutil", "multiprocessing.pool"):
+    attempt(name, lambda name=name: __import__(name))
+attempt("uuid4", lambda: __import__("uuid").uuid4())
+''', role="app")
+        self.assertEqual(set(r.values()), {"ok"}, r)
 
 
 class TestBypassRegressions(unittest.TestCase):
-    """The five auditor findings on the first version. Each must stay closed."""
+    """Auditor findings on earlier versions: changing module state after install must not widen anything."""
 
     MARKER_HELPERS = '''
 MARK = os.path.join(TMP, "pwned")
@@ -420,46 +419,19 @@ def pwned():
     return os.path.exists(MARK)
 '''
 
-    def test_1_approved_argv_cannot_launch_another_binary(self):
-        r = run_child(self.MARKER_HELPERS + '''
-GIT_TAG = %r
-subprocess.run(GIT_TAG, capture_output=True, timeout=20)          # approved call first
-attempt("spawn_env", lambda: os.posix_spawn("/bin/touch", GIT_TAG, dict(os.environ)))
-attempt("spawn_none", lambda: os.posix_spawn("/bin/touch", GIT_TAG, None))
-attempt("spawnp", lambda: os.posix_spawnp("touch", GIT_TAG, dict(os.environ)))
-attempt("spawn_marker", lambda: os.posix_spawn("/bin/touch", ["touch", MARK], dict(os.environ)))
-import time; time.sleep(0.3)
-R["pwned"] = pwned()
-''' % (GIT_TAG,), role="baseline")
-        for k in ("spawn_env", "spawn_none", "spawnp", "spawn_marker"):
-            self.assertNotEqual(r[k], "ok", k)
-        self.assertFalse(r["pwned"])
-
     def test_2_module_tampering_does_not_widen(self):
         r = run_child(self.MARKER_HELPERS + '''
-VERIFY = %r
-B = os.path.join(TMP, "b.json"); open(B, "w").write("{}")
-real_exe = sys.executable
 guard._installed["role"] = "app"
 guard.ROLES["baseline"] = (("OTHER_PORT",), ())
 guard.ROLES["app"] = (("OTHER_PORT",), ())
 guard.is_loopback = lambda host: True
-guard.GIT_ARGVS = (("/bin/touch", MARK),)
-guard.VERIFY = "/bin/touch"
 sys.executable = "/bin/touch"
 attempt("conn_other", lambda: conn(OTHER))
-attempt("forged_git", lambda: subprocess.run(["/bin/touch", MARK]))
-attempt("verify_as_app", lambda: subprocess.run([real_exe, VERIFY, B], capture_output=True))
-attempt("fake_executable", lambda: subprocess.run(["/bin/touch", VERIFY, B]))
+attempt("program", lambda: subprocess.run(["/bin/touch", MARK]))
 attempt("still_gate", lambda: conn(P["GATE_PORT"]))
 R["pwned"] = pwned()
-''' % (VERIFY,), role="baseline")
-        self.assertEqual(r["conn_other"], "denied")
-        self.assertEqual(r["forged_git"], "denied")
-        self.assertEqual(r["verify_as_app"], "denied", "baseline must not gain the app's verify argv")
-        self.assertEqual(r["fake_executable"], "denied")
-        self.assertEqual(r["still_gate"], "ok")
-        self.assertFalse(r["pwned"])
+''', role="baseline")
+        self.assertEqual(r, {"conn_other": "denied", "program": "denied", "still_gate": "ok", "pwned": False})
 
     def test_2c_patching_loopback_helpers_does_not_widen(self):
         # 0.0.0.0 is not loopback to the guard, but Linux delivers it locally: nothing leaves the machine.
@@ -473,76 +445,6 @@ attempt("dns_after_patch", lambda: socket.gethostbyname("example.com"))
 ''', role="app")
         self.assertEqual(r, {"before": "denied", "after_patch": "denied", "dns_after_patch": "denied"})
 
-    def test_2b_app_sys_executable_swap(self):
-        r = run_child(self.MARKER_HELPERS + '''
-VERIFY = %r
-B = os.path.join(TMP, "b.json"); open(B, "w").write("{}")
-sys.executable = "/bin/touch"
-attempt("swapped", lambda: subprocess.run(["/bin/touch", VERIFY, MARK]))
-R["pwned"] = pwned()
-''' % (VERIFY,), role="app")
-        self.assertEqual(r["swapped"], "denied")
-        self.assertFalse(r["pwned"])
-
-    def test_3_path_swap_cannot_replace_git(self):
-        r = run_child(self.MARKER_HELPERS + '''
-GIT_TAG = %r
-fake = os.path.join(TMP, "git")
-with open(fake, "w") as f:
-    f.write("#!/bin/sh\\ntouch " + MARK + "\\n")
-os.chmod(fake, 0o755)
-os.environ["PATH"] = TMP + os.pathsep + os.environ.get("PATH", "")
-attempt("git_via_path", lambda: subprocess.run(GIT_TAG, capture_output=True, timeout=20))
-R["pwned"] = pwned()
-''' % (GIT_TAG,), role="baseline")
-        self.assertEqual(r["git_via_path"], "denied")
-        self.assertFalse(r["pwned"])
-
-    def test_4_multiprocessing_and_pty_cannot_start_programs(self):
-        r = run_child(self.MARKER_HELPERS + '''
-import multiprocessing, pty
-for method in ("spawn", "forkserver"):
-    def start(method=method):
-        p = multiprocessing.get_context(method).Process(target=os.getpid)
-        p.start(); p.join(5)
-    attempt("mp_" + method, start)
-attempt("pty", lambda: pty.spawn(["/bin/touch", MARK]))
-import time; time.sleep(0.3)
-R["pwned"] = pwned()
-''', role="baseline")
-        self.assertEqual(r["mp_spawn"], "denied")
-        self.assertEqual(r["mp_forkserver"], "denied")
-        self.assertFalse(r["pwned"], "pty.spawn's child must not exec anything")
-
-    def test_5_preexec_fn_cannot_exec_another_binary(self):
-        r = run_child(self.MARKER_HELPERS + '''
-GIT_TAG = %r
-script = os.path.join(TMP, "evil.sh")
-with open(script, "w") as f:
-    f.write("#!/bin/sh\\ntouch " + MARK + "\\n")
-os.chmod(script, 0o755)
-def evil_same_argv():
-    os.execv(script, GIT_TAG)            # the approved argv, a different program
-def evil_other_argv():
-    os.execv("/bin/touch", ["touch", MARK])
-attempt("preexec", lambda: subprocess.run(GIT_TAG, preexec_fn=evil_same_argv, capture_output=True, timeout=20))
-attempt("preexec2", lambda: subprocess.run(GIT_TAG, preexec_fn=evil_other_argv, capture_output=True, timeout=20))
-import time; time.sleep(0.3)
-R["pwned"] = pwned()
-''' % (GIT_TAG,), role="baseline")
-        self.assertNotEqual(r["preexec"], "ok")
-        self.assertNotEqual(r["preexec2"], "ok")
-        self.assertFalse(r["pwned"])
-
-    def test_allowed_calls_still_work_both_spawn_paths(self):
-        """git by name goes through fork_exec, sys.executable through posix_spawn: both must still work."""
-        r = run_child('''
-GIT_TAG = %r
-GIT_HEAD = %r
-attempt("tag", lambda: subprocess.run(GIT_TAG, capture_output=True, timeout=20))
-attempt("head_no_capture", lambda: subprocess.run(GIT_HEAD, stdout=subprocess.DEVNULL, timeout=20))
-''' % (GIT_TAG, GIT_HEAD), role="baseline")
-        self.assertEqual(r, {"tag": "ok", "head_no_capture": "ok"})
 
 
 class TestInstall(unittest.TestCase):
