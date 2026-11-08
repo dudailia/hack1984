@@ -24,10 +24,14 @@
   const has = (s, part) => typeof s === 'string' && s.includes(part);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const frame = document.getElementById('f');
+  // ?events=<name>.jsonl runs the whole harness against another replay file in /shared/fixtures/ (same rule as app.js).
+  const evParam = new URLSearchParams(location.search).get('events') || '';
+  const EVENTS_NAME = /^[a-z0-9_-]+\.jsonl$/.test(evParam) ? evParam : 'demo_events.jsonl';
+  const EV = EVENTS_NAME === 'demo_events.jsonl' ? '' : `&events=${EVENTS_NAME}`;
 
   // Load the page under test at a replay time and wait until the seek is done.
   async function load(query) {
-    await new Promise((resolve) => { frame.onload = resolve; frame.src = `../index.html?${query}`; });
+    await new Promise((resolve) => { frame.onload = resolve; frame.src = `../index.html?${query}${EV}`; });
     for (let i = 0; i < 200; i += 1) {
       const st = frame.contentDocument && frame.contentDocument.getElementById('replay-status');
       if (st && /\d:\d\d/.test(st.textContent)) return frame.contentDocument;
@@ -39,8 +43,45 @@
     && node.getClientRects().length > 0;
 
   try {
-    const text = await (await fetch('/shared/fixtures/demo_events.jsonl', { cache: 'no-store' })).text();
+    const text = await (await fetch(`/shared/fixtures/${EVENTS_NAME}`, { cache: 'no-store' })).text();
     const events = text.split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+    out.push(`INFO events file ${EVENTS_NAME}, ${events.length} events`);
+
+    // Everything below is read from the events: which session plays which part, the seek times, the rules, the
+    // hosts and the secrets. Nothing is specific to one scenario.
+    const of = (sid, type) => events.filter((e) => e.session_id === sid && e.type === type);
+    const one = (sid, type) => of(sid, type)[0] || null;
+    const starts = events.filter((e) => e.type === 'run_started');
+    const pick = (f) => { const e = starts.find(f); return e ? e.session_id : null; };
+    const ROLE = {
+      compromised: pick((e) => e.data.mode === 'compromised' || e.data.mode === 'single_agent'),
+      careless: pick((e) => e.data.plant_careless === true),
+      dtfake: pick((e) => e.data.mode === 'doublethink' && !e.data.plant_careless && e.data.source === 'fake'),
+    };
+    const verify = events.find((e) => e.type === 'proof_result' && !e.data.tampered) || null;
+    const tamper = events.find((e) => e.type === 'proof_result' && e.data.tampered) || null;
+    ROLE.dtreal = verify ? verify.session_id
+      : pick((e) => e.data.mode === 'doublethink' && !e.data.plant_careless && e.data.source === 'real');
+    const doneAt = (sid) => (one(sid, 'run_done') || {}).t_ms;
+    const numbersBeat = events.find((e) => e.type === 'beat' && e.data && e.data.id === 'numbers');
+    const RESULTS_AT = numbersBeat ? numbersBeat.t_ms : Math.max(...events.map((e) => e.t_ms)) + 1;
+    // A seek halfway between an event and the next one.
+    const after = (ev) => { const nx = events.find((e) => e.t_ms > ev.t_ms); return nx ? Math.floor((ev.t_ms + nx.t_ms) / 2) : ev.t_ms + 1000; };
+    const attemptsOf = (sid) => of(sid, 'ledger_row').map((e) => e.data.row).filter((r) => r.row_type === 'attempt');
+    const isLocal = (h) => /^(127(?:\.\d{1,3}){3}|localhost)(:\d+)?$/i.test(h || '');
+    // Expected "N nouns to host" groups for sent attempts, built from the rows (independent of outbound.js).
+    const NOUN = { search: ['search query', 'search queries'], extract: ['page read', 'page reads'], reader: ['reading job', 'reading jobs'] };
+    const groupsOf = (rows, local) => {
+      const m = new Map();
+      for (const r of rows.filter((x) => x.decision !== 'blocked' && isLocal(x.destination) === local)) {
+        const k = `${r.kind}|${r.destination}`;
+        m.set(k, { kind: r.kind, host: r.destination, n: ((m.get(k) || {}).n || 0) + 1 });
+      }
+      return [...m.values()].map((g) => `${g.n} ${(NOUN[g.kind] || [g.kind, g.kind])[g.n === 1 ? 0 : 1]} to ${g.host}`).join(', ');
+    };
+    const leakRule = (r) => r.rule === 'canary' || (typeof r.rule === 'string' && r.rule.startsWith('secret.'));
+    out.push(`INFO roles ${JSON.stringify(ROLE)}`);
+    ok('events name every role the tests need', Object.values(ROLE).every(Boolean) && !!verify && !!tamper, JSON.stringify(ROLE));
 
     // Ledger entries per session, as app.js stores them ({row, display, blockedInfo}).
     const sessions = {};
@@ -57,43 +98,46 @@
 
     // ---------- Outbound logic (pure) ----------
     {
-      const sum = O.summarize(sessions.s_compromised1);
+      const rows = attemptsOf(ROLE.compromised);
+      const sum = O.summarize(sessions[ROLE.compromised]);
       const line = O.summaryText(sum);
       const check = O.check(sum);
-      ok('compromised: one table row per attempt', sum.attempts.length === sessions.s_compromised1.filter((x) => x.row.row_type === 'attempt').length, `${sum.attempts.length}`);
-      ok('compromised: stand-in plays the web, stayed on this device',
-        has(line, 'Sent to the local stand-in for the web (stayed on this device): 2 search queries to 127.0.0.1:8702.'), line);
-      ok('compromised: never reads as "nothing left"', !has(line, 'Nothing') && !has(line, 'Left this device'), line);
-      ok('compromised: blocked count', has(line, 'Blocked: 0.'), line);
+      const leak = rows.find((r) => r.decision !== 'blocked' && leakRule(r));
+      const local = groupsOf(rows, true);
+      const away = groupsOf(rows, false);
+      ok('compromised: one table row per attempt', sum.attempts.length === rows.length, `${sum.attempts.length}`);
+      ok('compromised: stand-in groups from the rows', !local || has(line, `Sent to the local stand-in for the web (stayed on this device): ${local}.`), line);
+      ok('compromised: left-this-device groups from the rows', away ? has(line, `Left this device: ${away}.`) : !has(line, 'Left this device:'), line);
+      ok('compromised: blocked count', has(line, `Blocked: ${rows.filter((r) => r.decision === 'blocked').length}.`), line);
+      ok('compromised: the events contain a sent leak', !!leak, JSON.stringify(rows.map((r) => r.rule)));
       ok('compromised: secret line says yes', check.verdict === 'yes' && has(check.text, ': yes'), check.text);
-      ok('compromised: wording from the check result', has(check.text, 'matches a confirmed secret (codename)') && has(check.text, 'secret.codename') && has(check.text, '127.0.0.1:8702'), check.text);
+      const leakEntry = sessions[ROLE.compromised].find((x) => x.row === leak) || {};
+      ok('compromised: wording from the check result', !!leak && has(check.text, leak.rule) && has(check.text, leak.destination)
+        && (!leakEntry.display || !leakEntry.display.detail || has(check.text, leakEntry.display.detail)), check.text);
       ok('compromised: decision is sent', sum.attempts.every((a) => a.decision === 'sent'), JSON.stringify(sum.attempts.map((a) => a.decision)));
     }
-    {
-      const sum = O.summarize(sessions.s_dtfake1);
+    for (const role of ['dtfake', 'dtreal']) {
+      const rows = attemptsOf(ROLE[role]);
+      const sum = O.summarize(sessions[ROLE[role]]);
       const line = O.summaryText(sum);
       const check = O.check(sum);
-      ok('dtfake: reader jobs left, searches stayed', has(line, 'Left this device: 2 reading jobs to api.anthropic.com.')
-        && has(line, 'Sent to the local stand-in for the web (stayed on this device): 2 search queries to 127.0.0.1:8702.'), line);
-      ok('dtfake: secret line says no', check.verdict === 'no' && has(check.text, ': no') && has(check.text, '0 of 4 sent requests'), check.text);
+      const local = groupsOf(rows, true);
+      const away = groupsOf(rows, false);
+      const sent = rows.filter((r) => r.decision !== 'blocked').length;
+      ok(`${role}: left-this-device groups from the rows`, away ? has(line, `Left this device: ${away}.`) : !has(line, 'Left this device:'), line);
+      ok(`${role}: stand-in clause only for loopback rows`, local ? has(line, `Sent to the local stand-in for the web (stayed on this device): ${local}.`) : !has(line, 'stand-in'), line);
+      ok(`${role}: secret line says no`, check.verdict === 'no' && has(check.text, ': no') && has(check.text, `0 of ${sent} sent request`), check.text);
     }
     {
-      const sum = O.summarize(sessions.s_dtreal1);
+      const rows = attemptsOf(ROLE.careless);
+      const blocked = rows.filter((r) => r.decision === 'blocked');
+      const sum = O.summarize(sessions[ROLE.careless]);
       const line = O.summaryText(sum);
       const check = O.check(sum);
-      ok('dtreal: groups and counts from the rows',
-        has(line, 'Left this device: 2 search queries to api.tavily.com, 2 reading jobs to api.anthropic.com.') && has(line, 'Blocked: 0.'), line);
-      ok('dtreal: no stand-in clause', !has(line, 'stand-in'), line);
-      ok('dtreal: secret line says no', check.verdict === 'no', check.text);
-    }
-    {
-      const sum = O.summarize(sessions.s_careless1);
-      const line = O.summaryText(sum);
-      const check = O.check(sum);
-      ok('careless: blocked, nothing left', has(line, 'Nothing left this device.') && has(line, 'Blocked: 1.'), line);
-      ok('careless: decision is blocked with its rule', sum.attempts.length === 1 && sum.attempts[0].decision === 'blocked' && sum.attempts[0].rule === 'secret.buyer', JSON.stringify(sum.attempts));
-      ok('careless: secret line says no, mentions the block', check.verdict === 'no' && has(check.text, 'nothing was sent') && has(check.text, 'secret.buyer'), check.text);
-      ok('careless: the block is a note, not part of the verdict', !has(check.verdictText, 'secret.buyer') && check.notes.length === 1, JSON.stringify(check));
+      ok('careless: blocked, nothing left', blocked.length > 0 && has(line, 'Nothing left this device.') && has(line, `Blocked: ${blocked.length}.`), line);
+      ok('careless: decision is blocked with its rule', blocked.length > 0 && sum.attempts.length === rows.length && sum.attempts[0].decision === 'blocked' && sum.attempts[0].rule === blocked[0].rule, JSON.stringify(sum.attempts));
+      ok('careless: secret line says no, mentions the block', blocked.length > 0 && check.verdict === 'no' && has(check.text, 'nothing was sent') && has(check.text, blocked[0].rule), check.text);
+      ok('careless: the block is a note, not part of the verdict', blocked.length > 0 && !has(check.verdictText, blocked[0].rule) && check.notes.length === 1, JSON.stringify(check));
     }
     {
       const sum = O.summarize([]);
@@ -151,14 +195,29 @@
         const li = doc.querySelectorAll('#steps li[aria-current="step"]');
         return li.length === 1 ? Number(li[0].dataset.step) : li.length === 0 ? 0 : -li.length;
       };
-      for (const [at, want] of [[350, 1], [500, 2], [15000, 3], [22300, 3], [40350, 1], [46000, 3], [54500, 4], [88000, 3], [106500, 4]]) {
+      const mid = (x, y) => Math.floor((x.t_ms + y.t_ms) / 2);
+      const C = ROLE.compromised;
+      const F = ROLE.dtfake;
+      const fakeClaims = of(F, 'reader_claims')[0];
+      const STEP_TIMES = [
+        [mid(one(C, 'run_started'), one(C, 'memo_loaded')), 1],
+        [mid(one(C, 'memo_loaded'), one(C, 'parties_confirmed')), 2],
+        [of(C, 'ledger_row')[0].t_ms, 3],
+        [doneAt(C), 3],
+        [mid(one(F, 'run_started'), one(F, 'memo_loaded')), 1],
+        [fakeClaims.t_ms, 3],
+        [doneAt(F), 4],
+        [doneAt(ROLE.careless), 3],
+        [after(verify), 4],
+      ];
+      for (const [at, want] of STEP_TIMES) {
         const doc = await load(`at=${at}&theme=console`);
         ok(`step strip at ${at} ms shows step ${want}`, current(doc) === want, `got ${current(doc)}`);
         const done = [...doc.querySelectorAll('#steps li.done')].map((li) => Number(li.dataset.step));
         ok(`step strip at ${at} ms: earlier steps marked done`, JSON.stringify(done) === JSON.stringify([...Array(want - 1).keys()].map((i) => i + 1)), JSON.stringify(done));
       }
       for (const th of ['console', '1984']) {
-        const doc = await load(`at=46000&theme=${th}`);
+        const doc = await load(`at=${fakeClaims.t_ms}&theme=${th}`);
         const strip = doc.getElementById('steps');
         const items = [...strip.querySelectorAll('li')];
         const tops = new Set(items.map((li) => Math.round(li.getBoundingClientRect().top)));
@@ -178,7 +237,7 @@
       }
       const doc = await load('at=1&theme=console');
       ok('step strip static before any run', current(doc) === 0 && doc.querySelectorAll('#steps li.done').length === 0, `got ${current(doc)}`);
-      const res = await load('at=125000&theme=console');
+      const res = await load(`at=${RESULTS_AT}&theme=console`);
       const rr = res.getElementById('results').getBoundingClientRect();
       const sr = res.getElementById('steps').getBoundingClientRect();
       ok('results screen covers the step strip', rr.top <= sr.top && rr.bottom >= sr.bottom, `${rr.top} vs ${sr.top}`);
@@ -186,31 +245,37 @@
 
     // ---------- the Outbound panel in the page ----------
     {
-      const doc = await load('at=22300&theme=console');
+      const doc = await load(`at=${doneAt(ROLE.compromised)}&theme=console`);
       const panel = doc.getElementById('outbound');
       ok('panel visible in the console theme', visible(doc, panel), 'not visible');
       const rows = doc.querySelectorAll('#ob-rows tr.ob-row');
-      ok('panel: one row per attempt (compromised)', rows.length === 2, `${rows.length}`);
-      const expected = O.summarize(sessions.s_compromised1);
+      ok('panel: one row per attempt (compromised)', rows.length === attemptsOf(ROLE.compromised).length, `${rows.length}`);
+      const expected = O.summarize(sessions[ROLE.compromised]);
       ok('panel: summary line is computed', doc.getElementById('ob-summary').textContent === O.summaryText(expected), doc.getElementById('ob-summary').textContent);
       ok('panel: check line is computed', doc.getElementById('ob-check').textContent === O.check(expected).text, doc.getElementById('ob-check').textContent);
       ok('panel: leak decision marked', !!doc.querySelector('#ob-rows tr.ob-row.leak'), 'no .leak row');
       ok('panel: fits 1280x720 (no page scroll)', doc.documentElement.scrollHeight <= 720 + 1, `${doc.documentElement.scrollHeight}`);
     }
     {
-      const doc = await load('at=54500&theme=console');
-      const expected = O.summarize(sessions.s_dtfake1);
+      const doc = await load(`at=${doneAt(ROLE.dtfake)}&theme=console`);
+      const expected = O.summarize(sessions[ROLE.dtfake]);
       ok('panel: doublethink says no', doc.getElementById('ob-check').textContent === O.check(expected).text && O.check(expected).verdict === 'no', doc.getElementById('ob-check').textContent);
     }
     {
-      const doc = await load('at=88000&theme=console');
+      const doc = await load(`at=${doneAt(ROLE.careless)}&theme=console`);
       const panel = doc.getElementById('outbound');
-      ok('panel: careless block row', doc.querySelectorAll('#ob-rows tr.ob-row.blocked').length === 1, 'no blocked row');
-      ok('panel: shows no query text', !has(panel.textContent, 'Ossory') && !has(panel.textContent, 'Brackwater'), panel.textContent);
+      const nBlocked = attemptsOf(ROLE.careless).filter((r) => r.decision === 'blocked').length;
+      ok('panel: careless block row', nBlocked > 0 && doc.querySelectorAll('#ob-rows tr.ob-row.blocked').length === nBlocked, 'blocked rows differ');
+      // No confirmed secret of that run, and no query text, in the panel.
+      const pc = one(ROLE.careless, 'parties_confirmed');
+      const secretsHere = pc ? pc.data.confirmed_secrets.flatMap((g) => g.values) : [];
+      const queries = of(ROLE.careless, 'ledger_row').map((e) => (e.data.display && e.data.display.query) || '').filter(Boolean);
+      const shown = [...secretsHere, ...queries].filter((v) => has(panel.textContent, v));
+      ok('panel: shows no query text and no secret', secretsHere.length > 0 && shown.length === 0, shown.join(', '));
     }
     {
-      const doc = await load('at=106500&theme=console');
-      ok('panel: follows the verified run in the proof beat', doc.getElementById('ob-summary').textContent === O.summaryText(O.summarize(sessions.s_dtreal1)), doc.getElementById('ob-summary').textContent);
+      const doc = await load(`at=${after(verify)}&theme=console`);
+      ok('panel: follows the verified run in the proof beat', doc.getElementById('ob-summary').textContent === O.summaryText(O.summarize(sessions[ROLE.dtreal])), doc.getElementById('ob-summary').textContent);
     }
     // ---------- results screen: runs chosen by the data, never by position (Ilia's check) ----------
     {
@@ -245,6 +310,60 @@
       const v = R.select(variant);
       ok('leak_judge FALLBACK and a missing detector both exclude a run', v.modes.every((m) => m.index === null) && v.excluded.length === 3, JSON.stringify(v.modes.map((m) => m.index)));
     }
+    // ---------- results screen: real-estate headline, corporate memo as "First evaluation" ----------
+    {
+      const R = window.Results;
+      const two = await (await fetch('fixtures/results_two_scenarios.json', { cache: 'no-store' })).json();
+      ok('scenarioOf: scenario field', R.scenarioOf({ scenario: 'real_estate' }) === 'real_estate' && R.scenarioOf({ scenario: 'Real-Estate' }) === 'real_estate', 'field not read');
+      ok('scenarioOf: label', R.scenarioOf({ label: 're-frozen' }) === 'real_estate' && R.scenarioOf({ label: 'batch real estate 2' }) === 'real_estate'
+        && R.scenarioOf({ label: 'checks-frozen rejudged-frozen' }) === 'corporate' && R.scenarioOf({ label: 'benign-frozen' }) === 'corporate', 'label rule');
+      const both = R.selectScenarios(two);
+      const idx = (sel) => Object.fromEntries(sel.modes.map((m) => [m.key, m.index]));
+      ok('two scenarios: headline is the frozen real-estate run', both.headline.scenario === 'real_estate'
+        && Object.values(idx(both.headline)).every((i) => i === 4), JSON.stringify(idx(both.headline)));
+      ok('two scenarios: first evaluation from the corporate runs', !!both.first && JSON.stringify(idx(both.first))
+        === JSON.stringify({ single_agent: 2, compromised: 2, two_minds: 3, doublethink: 3 }), JSON.stringify(both.first && idx(both.first)));
+      ok('two scenarios: each block excludes its own fallback run', both.headline.excluded.map((x) => x.index).join() === '1'
+        && both.first.excluded.map((x) => x.index).join() === '0', JSON.stringify([both.headline.excluded, both.first.excluded]));
+
+      const box = document.createElement('section');
+      R.render(box, two, { example: false, source: '/shared/results/results.json' });
+      const vals = (root) => Object.fromEntries([...root.querySelectorAll('.bv')].map((n) => [n.dataset.mode, n.textContent.trim()]));
+      const head = box.querySelector('.headline-eval');
+      const first = box.querySelector('.first-eval');
+      ok('two scenarios: headline bars', !!head && JSON.stringify(vals(head)) === JSON.stringify({ single_agent: '4 / 40', compromised: '38 / 40', two_minds: '0 / 40', doublethink: '0 / 40' }), JSON.stringify(head && vals(head)));
+      ok('two scenarios: "First evaluation" below the headline', !!first && has(first.textContent, 'First evaluation')
+        && !!(head.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING), first ? first.textContent.slice(0, 80) : 'missing');
+      ok('two scenarios: first evaluation bars', !!first && JSON.stringify(vals(first)) === JSON.stringify({ single_agent: '2 / 40', compromised: '40 / 40', two_minds: '0 / 40', doublethink: '0 / 40' }), JSON.stringify(first && vals(first)));
+      const text = box.textContent;
+      const fallbackNumbers = ['1 / 40', '39 / 40', '13 / 30', '17 / 30', '5.32', '9.75', '7 / 40', '37 / 40', '5 / 40', '3 / 40', '11 / 30', '19 / 30', '8.25', '6.41'].filter((n) => text.includes(n));
+      ok('two scenarios: no fallback number appears', fallbackNumbers.length === 0, fallbackNumbers.join(', '));
+      ok('two scenarios: false blocks from the real-estate run', has(box.querySelector('.fb').textContent, '1 / 30') && has(box.querySelector('.fb').textContent, 'run 5 of 5'), box.querySelector('.fb').textContent);
+      ok('two scenarios: sources name runs by label and file place', has(head.textContent, 'run 5 of 5') && has(head.textContent, '“re-checks-frozen”')
+        && has(first.textContent, 'run 3 of 5') && has(first.textContent, 'run 4 of 5'), head.textContent.slice(-200));
+
+      // The label alone also marks a real-estate run; without one, the screen is the corporate screen as before.
+      const byLabel = JSON.parse(JSON.stringify(two));
+      byLabel.runs.forEach((r) => { delete r.scenario; });
+      ok('two scenarios: label alone is enough', R.selectScenarios(byLabel).headline.scenario === 'real_estate', 'not found by label');
+      const three = await (await fetch('fixtures/results_three_runs.json', { cache: 'no-store' })).json();
+      const plain = R.selectScenarios(three);
+      const b3 = document.createElement('section');
+      R.render(b3, three, { example: false, source: 'x' });
+      ok('no real-estate run: corporate screen as before, no first-evaluation block', plain.first === null && plain.headline.scenario === null
+        && !b3.querySelector('.first-eval') && !has(b3.textContent, 'Real estate'), b3.textContent.slice(0, 120));
+      // A real-estate run judged only by the fallback never becomes the headline.
+      const onlyFallbackRe = JSON.parse(JSON.stringify(two));
+      onlyFallbackRe.runs.splice(4, 1);
+      ok('fallback-only real-estate runs: no real-estate headline', R.selectScenarios(onlyFallbackRe).headline.scenario === null, 'became headline');
+      // ?example=1 rules still apply to both blocks.
+      const bx = document.createElement('section');
+      const ex = JSON.parse(JSON.stringify(two));
+      ex.runs.forEach((r) => { delete r.detector; });
+      R.render(bx, ex, { example: true, source: 'x' });
+      const nums = [...bx.querySelectorAll('[data-num]')];
+      ok('two scenarios with ?example=1: every number labelled', nums.length > 8 && nums.every((n) => n.querySelector('.example-tag')), `${nums.length}`);
+    }
     // ---------- results screen: never example data unless ?example=1 (Ilia's must-fix) ----------
     {
       const head = await fetch('/shared/results/results.json', { cache: 'no-store' });
@@ -252,7 +371,7 @@
         .filter((e) => e.name.includes('results_example.json')).length;
       if (head.status === 404) {
         for (const th of ['console', '1984']) {
-          const doc = await load(`at=125000&theme=${th}`);
+          const doc = await load(`at=${RESULTS_AT}&theme=${th}`);
           const box = doc.getElementById('results');
           const text = box.textContent;
           ok(`missing results.json: "No measured results yet" (${th})`, box.classList.contains('open') && has(text, 'No measured results yet'), text.slice(0, 200));
@@ -263,11 +382,11 @@
         }
       } else {
         out.push('SKIP missing-file case: /shared/results/results.json exists on this checkout');
-        const doc = await load('at=125000&theme=console');
+        const doc = await load(`at=${RESULTS_AT}&theme=console`);
         ok('results.json present: example file not fetched without ?example=1', exampleLoads(doc) === 0, `${exampleLoads(doc)} example fetches`);
       }
       // Explicit ?example=1: the example file, a large label at the top and on every number.
-      const doc = await load('at=125000&theme=console&example=1');
+      const doc = await load(`at=${RESULTS_AT}&theme=console&example=1`);
       const box = doc.getElementById('results');
       const label = 'EXAMPLE DATA, not measured';
       const banner = box.querySelector('.example-banner');
@@ -281,14 +400,14 @@
     }
     {
       // The results screen still covers the Outbound strip and the footer (grid rows 2 to 4).
-      const doc = await load('at=125000&theme=console');
+      const doc = await load(`at=${RESULTS_AT}&theme=console`);
       const res = doc.getElementById('results');
       const r = res.getBoundingClientRect();
       const ob = doc.getElementById('outbound').getBoundingClientRect();
       ok('results screen covers the Outbound strip', res.classList.contains('open') && r.top <= ob.top && r.bottom >= ob.bottom, `${r.top}-${r.bottom} vs ${ob.top}-${ob.bottom}`);
     }
     {
-      const doc = await load('at=22300&theme=1984');
+      const doc = await load(`at=${doneAt(ROLE.compromised)}&theme=1984`);
       ok('panel hidden in the 1984 theme', !visible(doc, doc.getElementById('outbound')), 'visible');
       ok('1984 footer still visible', visible(doc, doc.querySelector('footer.bottom')), 'footer hidden');
     }
@@ -326,7 +445,7 @@
 
     // 3. Tampered rows show only the failure (both themes).
     for (const th of ['console', '1984']) {
-      const doc = await load(`at=113500&theme=${th}`);
+      const doc = await load(`at=${after(tamper)}&theme=${th}`);
       const broken = [...doc.querySelectorAll('#ledger li.broken')];
       const allowedShown = broken.filter((li) => [...li.querySelectorAll('.status.allowed, .mark.ok')].some((n) => visible(doc, n)));
       ok(`tampered rows show only the failure (${th})`, broken.length > 0 && allowedShown.length === 0, `${broken.length} broken, ${allowedShown.length} with an allowed mark`);
@@ -334,8 +453,8 @@
 
     // 4. Reader job summaries count documents from docs_read; typed facts appear once per run.
     {
-      const doc = await load('at=80000&theme=console');
-      const reads = events.filter((e) => e.type === 'docs_read' && e.session_id === 's_dtreal1');
+      const doc = await load(`at=${doneAt(ROLE.dtreal)}&theme=console`);
+      const reads = of(ROLE.dtreal, 'docs_read');
       const jobs = [...doc.querySelectorAll('#reader-body .job')];
       const bad = jobs.filter((j) => {
         const ev = reads.find((r) => r.data.job === j.dataset.job);
