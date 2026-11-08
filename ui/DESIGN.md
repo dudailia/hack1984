@@ -366,6 +366,9 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
   - Below the cards come `reader_claims.data`: `kept` claims with their quotes, and `dropped` claims in muted text
     with `reason`.
 - **Answer bar:** a one-line summary of the `answer` event.
+  - A run that ends without an answer shows `No answer. Run ended: {outcome}.`, with `run_done.data.reason` in
+    brackets after the outcome when it is not null (for example `Run ended: error (reader timed out).`). The run
+    labels (`{mode} · {source} · {outcome}`) show the reason the same way (`RunView.outcomeText`).
   - Clicking it, or pressing A, opens the answer sheet. The sheet covers the three rooms and lists each `needs[]`
     with its `items[]`: subject, value and unit, period, the quote in quote marks, and `source.title`, `source.url`
     and `source.result_id`.

@@ -36,6 +36,13 @@ class StaticPage(unittest.TestCase):
         js = read("app.js")
         self.assertIn("rule === 'canary' || rule.startsWith('secret.') || rule.startsWith('provenance.')", js)
 
+    def test_run_done_reason_shown_next_to_outcome(self):
+        # FORMATS §10 run_done.data.reason: the answer bar and the run label both use RunView.outcomeText.
+        js = read("app.js")
+        self.assertIn("Run ended: ${window.RunView.outcomeText(s.done)}.", js)
+        self.assertIn("if (s.done) bits.push(window.RunView.outcomeText(s.done));", js)
+        self.assertNotRegex(js, r"Run ended: \$\{s\.done\.outcome\}")
+
     def test_console_theme_has_no_hacker_decorations(self):
         css = read("styles.css")
         self.assertNotIn("repeating-linear-gradient", css)

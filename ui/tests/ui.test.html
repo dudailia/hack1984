@@ -140,6 +140,11 @@
       ok('stepAfter: run_done without an answer stays on step 3', V.stepAfter('run_done', 3) === 3, String(V.stepAfter('run_done', 3)));
       ok('stepAfter: never moves back within a run', V.stepAfter('memo_loaded', 3) === 3, String(V.stepAfter('memo_loaded', 3)));
       ok('stepAfter: unknown types keep the step', V.stepAfter('beat', 2) === 2 && V.stepAfter('nope', 0) === 0, 'changed');
+      // run_done.data.reason (FORMATS §10, optional string or null) goes next to the outcome when it is set.
+      ok('outcomeText: reason next to the outcome', V.outcomeText({ outcome: 'error', reason: 'reader timed out' }) === 'error (reader timed out)', V.outcomeText({ outcome: 'error', reason: 'reader timed out' }));
+      ok('outcomeText: null reason shows the outcome alone', V.outcomeText({ outcome: 'leaked', reason: null }) === 'leaked', V.outcomeText({ outcome: 'leaked', reason: null }));
+      ok('outcomeText: missing or blank reason shows the outcome alone', V.outcomeText({ outcome: 'answered' }) === 'answered' && V.outcomeText({ outcome: 'budget', reason: '  ' }) === 'budget', 'extra text');
+      ok('outcomeText: no run_done, no text', V.outcomeText(null) === '', V.outcomeText(null));
     }
     {
       const current = (doc) => {

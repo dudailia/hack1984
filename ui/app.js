@@ -240,7 +240,7 @@
     if (!s) return [];
     const bits = [s.mode, s.source];
     if (s.careless) bits.push('careless query');
-    if (s.done) bits.push(s.done.outcome);
+    if (s.done) bits.push(window.RunView.outcomeText(s.done));
     return bits.filter(Boolean);
   }
   const runDescription = (sid) => [sid, ...runBits(sid)].join(' · ');
@@ -345,7 +345,7 @@
     $('#answer-bar').disabled = !(s && s.answer);
     if (s && s.answer) t.textContent = s.answer.text || '';
     else if (s && s.done) {
-      t.textContent = `No answer. Run ended: ${s.done.outcome}.`;
+      t.textContent = `No answer. Run ended: ${window.RunView.outcomeText(s.done)}.`;
       t.classList.toggle('bad', s.done.outcome === 'leaked' || s.done.outcome === 'blocked');
     } else t.textContent = '—';
   }

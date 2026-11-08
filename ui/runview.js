@@ -1,4 +1,4 @@
-// Run view helpers (pure, no DOM): the step strip. Loaded before app.js; tested by
+// Run view helpers (pure, no DOM): the step strip and the outcome text. Loaded before app.js; tested by
 // ui/tests/ui.test.html. Event names: shared/FORMATS.md section 10. No event fields are added for these.
 'use strict';
 
@@ -22,5 +22,13 @@
     return Object.prototype.hasOwnProperty.call(STEP_OF, type) ? Math.max(p, STEP_OF[type]) : p;
   }
 
-  window.RunView = { STEPS, stepAfter };
+  // run_done outcome, with run_done.data.reason (FORMATS §10: why the run failed, null when it did not) next to it
+  // whenever the run gives one.
+  function outcomeText(done) {
+    if (!done || !done.outcome) return '';
+    const reason = typeof done.reason === 'string' ? done.reason.trim() : '';
+    return reason ? `${done.outcome} (${reason})` : String(done.outcome);
+  }
+
+  window.RunView = { STEPS, stepAfter, outcomeText };
 })();
