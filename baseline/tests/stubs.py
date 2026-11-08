@@ -91,6 +91,7 @@ class StubGate(_Stub):
         self.poison_from_search = poison_from_search
         self.block_queries = set(block_queries)
         self.state_path = state_path
+        self.detect_canary = True  # False: the Gate's allow-everything stub
         self.served = []  # (session_id, query, planted text on the poisoned page)
         self.sessions = {}
         self.search_count = 0
@@ -130,6 +131,8 @@ class StubGate(_Stub):
             if any(v.lower() in query.lower() for v in s["values"]):
                 rule = "secret.%s" % s["label"]
                 break
+        if self.detect_canary and session.get("canary") and session["canary"] in query:
+            rule = "canary"
         dest = "127.0.0.1:8702"
         if query in self.block_queries:
             row = self._row(sid, row_type="attempt", component=body.get("component"), kind="search",

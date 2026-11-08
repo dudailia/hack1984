@@ -30,10 +30,36 @@ def canon(obj):
 class StubGate:
     """In-process stand-in for the Gate HTTP API (FORMATS §3). Rows are hash-chained like §7."""
 
-    def __init__(self, enforce=True, found=True, fail_on_call=None):
+    def __init__(self, enforce=True, found=True, fail_on_call=None, rule_for=None, error_for=None,
+                 upstream_fail=None):
         self.enforce, self.found, self.fail_on_call = enforce, found, fail_on_call
+        # (kind, arg) -> True: the attempt is allowed and ledgered, the upstream call fails, and the Gate answers
+        # HTTP 200 {"status":"error", ..., "ledger":[attempt, result]}; the real client raises GateError on it
+        self.upstream_fail = upstream_fail
+        self.rule_for = rule_for  # query -> rule id the checks would return (default: secret.buyer on "ossory")
+        self.error_for = error_for  # (kind, arg) -> GateError to raise, like the real client on 4xx/5xx
+        self.search_of = {}  # result id -> index of the search that returned it (to refuse mixed extracts)
         self.calls, self.sessions = [], []
         self.seq, self.prev, self.next_id, self.next_job = 0, "0" * 64, 1, 1
+
+    def _maybe_error(self, kind, arg):
+        if self.error_for is not None:
+            err = self.error_for(kind, arg)
+            if err is not None:
+                raise err
+
+    def _maybe_upstream_fail(self, sid, kind, arg, component, dest, rule=None):
+        if self.upstream_fail is None or not self.upstream_fail(kind, arg):
+            return
+        a = self._attempt(sid, component, kind, dest, "allowed", rule)
+        r = self._row(sid, row_type="result", attempt_seq=a["seq"], status="error", http_status=432,
+                      credits_used=None, response_commitment="ef" * 32)
+        reply = {"status": "error", "rule": rule, "ledger_seq": a["seq"], "result_ids": [], "credits_used": 0,
+                 "ledger": [a, r]}
+        if kind == "reader":
+            reply.update(job="j_%02d" % self.next_job, typed={"need": "x", "found": False, "values": []},
+                         claims=[], dropped=[], sources={}, docs=[])
+        raise loop.GateError("http_200", None, status=None, reply=reply)  # what GateClient._post raises
 
     def _tick(self):
         if self.fail_on_call is not None and len(self.calls) >= self.fail_on_call:
@@ -62,7 +88,13 @@ class StubGate:
     def search(self, sid, need, query, preset, component="planner"):
         self.calls.append(("search", component, need, query, preset))
         self._tick()
-        rule = "secret.buyer" if "ossory" in query.lower() else None
+        self._maybe_error("search", query)
+        if self.rule_for is not None:
+            rule = self.rule_for(query)
+        else:
+            rule = "secret.buyer" if "ossory" in query.lower() else None
+        if not (rule and self.enforce):
+            self._maybe_upstream_fail(sid, "search", query, component, "api.tavily.com", rule)
         if rule and self.enforce:
             a = self._attempt(sid, component, "search", "api.tavily.com", "blocked", rule)
             return {"status": "blocked", "rule": rule, "detail": "matches a confirmed secret (buyer) " + POISON,
@@ -71,6 +103,8 @@ class StubGate:
         r = self._result(sid, a, 1)
         ids = ["r_%02d" % i for i in (self.next_id, self.next_id + 1)]
         self.next_id += 2
+        n_search = len([c for c in self.calls if c[0] == "search"])
+        self.search_of.update({i: n_search for i in ids})
         out = {"status": "sent", "rule": rule, "detail": POISON, "ledger_seq": a["seq"], "result_ids": ids,
                "credits_used": 1, "ledger": [a, r]}
         if component == "baseline":
@@ -81,6 +115,9 @@ class StubGate:
     def extract(self, sid, need, result_ids, preset):
         self.calls.append(("extract", "planner", need, tuple(result_ids), preset))
         self._tick()
+        self._maybe_error("extract", tuple(result_ids))
+        if len({self.search_of.get(i) for i in result_ids}) > 1:  # the real Gate: 400, nothing ledgered
+            raise loop.GateError("mixed_searches", "result ids must all come from the same search", status=400)
         a = self._attempt(sid, "planner", "extract", "api.tavily.com", "allowed", None)
         r = self._result(sid, a, 1)
         return {"status": "sent", "rule": None, "ledger_seq": a["seq"], "result_ids": list(result_ids),
@@ -89,6 +126,8 @@ class StubGate:
     def read(self, sid, need, result_ids, claim_types):
         self.calls.append(("read", need, tuple(result_ids), tuple(claim_types)))
         self._tick()
+        self._maybe_error("read", tuple(result_ids))
+        self._maybe_upstream_fail(sid, "reader", tuple(result_ids), "reader", "api.anthropic.com")
         job = "j_%02d" % self.next_job
         self.next_job += 1
         a = self._attempt(sid, "reader", "reader", "api.anthropic.com", "allowed", None)
@@ -163,7 +202,8 @@ class Base(unittest.TestCase):
                  baseline_runs=None, budget=None):
         rec = Recorder()
         self.gate = gate or StubGate(enforce=(mode == "doublethink"))
-        kw = dict(gate=self.gate, next_action=planner or Script(), today=TODAY)
+        self.planner = planner or Script()
+        kw = dict(gate=self.gate, next_action=self.planner, today=TODAY)
         if baseline_runs is not None:
             kw["baseline_runs"] = baseline_runs
         if budget is not None:
@@ -355,10 +395,46 @@ class TestDoublethink(Base):
         self.assertEqual((b["query"], b["rule"], b["component"], b["kind"], b["destination"]),
                          (CARELESS, "secret.buyer", "planner", "search", "api.tavily.com"))
         self.assertEqual(b["ledger_seq"], 1)
-        self.assertEqual(rec.of("planner_typed")[0], {"need": "careless_check", "found": False, "values": []})
+        # the planted search creates no need, no planner_typed, and gives the Planner nothing
+        self.assertEqual([t["need"] for t in rec.of("planner_typed")], ["sector_growth"])
+        self.assertEqual(self.planner.calls[0][0][3], [], "Planner's first input has no planted result")
         done = self.run_done(rec)
         self.assertEqual((done["blocked"], done["leaks"], done["outcome"]), (1, 0, "answered"))
         self.assertEqual(rec.of("run_started")[0]["plant_careless"], True)
+
+    def test_planted_run_answer_has_no_careless_need(self):
+        rec = self.run_loop(plant=True, planner=Script(search()))
+        ans = rec.of("answer")[0]
+        self.assertEqual([n["need"] for n in ans["needs"]], ["sector_growth"])
+        self.assertTrue(ans["text"].startswith("Sector growth:"), ans["text"])
+        self.assertNotIn("Careless check", ans["text"])
+        self.assertNotIn("careless", json.dumps(ans).lower())
+        self.assertEqual(ans["needs"][0]["status"], "found")
+        self.assertTrue(ans["needs"][0]["items"])
+
+    def test_planted_search_that_gets_through_is_never_read(self):
+        # if the planted query were ever sent (e.g. checks stubbed), its results must not be read or filed
+        rec = self.run_loop(plant=True, planner=Script(search()), gate=StubGate(enforce=False))
+        reads = [c for c in self.gate.calls if c[0] == "read"]
+        self.assertEqual([r[1] for r in reads], ["sector_growth"])
+        self.assertNotIn(("r_01", "r_02"), [r[2] for r in reads], "planted results r_01/r_02 never read")
+        self.assertEqual([t["need"] for t in rec.of("planner_typed")], ["sector_growth"])
+        self.assertEqual(self.planner.calls[0][0][3], [])
+        self.assertNotIn("Careless check", rec.of("answer")[0]["text"])
+
+    def test_claims_filed_under_the_need_of_their_read(self):
+        # two needs with the same claim type: each keeps its own claims
+        p = Script(search("sector_growth", "revenue_growth", "payments processing growth 2026"),
+                   search("acquiring_growth", "revenue_growth", "merchant acquiring revenue growth"))
+        rec = self.run_loop(planner=p)
+        ans = rec.of("answer")[0]
+        by_need = {n["need"]: {i["source"]["result_id"] for i in n["items"]} for n in ans["needs"]}
+        # compose drops same-value duplicates within a need; what matters is that each need keeps its own reads
+        self.assertTrue(by_need["sector_growth"] and by_need["sector_growth"] <= {"r_01", "r_02"}, by_need)
+        self.assertTrue(by_need["acquiring_growth"] and by_need["acquiring_growth"] <= {"r_03", "r_04"}, by_need)
+        self.assertEqual([n["status"] for n in ans["needs"]], ["found", "found"])
+        self.assertTrue(ans["text"].startswith("Sector growth:"), ans["text"])
+        self.assertIn("Acquiring growth:", ans["text"])
 
     def test_unplanted_block_not_marked(self):
         rec = self.run_loop(planner=Script(search(q="Ossory payments deal")))
@@ -366,12 +442,51 @@ class TestDoublethink(Base):
         self.assertEqual(self.run_done(rec)["outcome"], "blocked")
 
     def test_budget(self):
-        p = Script(repeat=search())
+        p = Script(*[search(q="payments processing growth query %d" % i) for i in range(10)])
         rec = self.run_loop(planner=p, gate=StubGate(found=False))
         self.assertEqual(len(self.gate.gate_actions), 6)
         self.assertEqual(len(p.calls), 6)
         self.assertEqual(self.run_done(rec)["outcome"], "budget")
         self.assertNotIn("answer", rec.types())
+
+    def test_repeats_not_executed_and_two_stop(self):
+        p = Script(repeat=search())
+        rec = self.run_loop(planner=p, gate=StubGate(found=False))
+        self.assertEqual(len(self.gate.gate_actions), 1, "a repeated action is never sent")
+        self.assertEqual(len(p.calls), 3, "first action, then two repeats, then stop")
+        self.assertEqual(len(rec.of("planner_typed")), 1, "repeats emit nothing")
+        self.assertEqual(self.run_done(rec)["outcome"], "budget")
+
+    def test_repeat_counts_toward_budget(self):
+        q1, q2, q3 = "payments growth 2026", "payments peers ev revenue", "payments market size 2026"
+        p = Script(search(q=q1), search(q=q1), search(q=q2), search(q=q3))
+        self.run_loop(planner=p, budget=3)
+        self.assertEqual([c[3] for c in self.gate.gate_actions], [q1, q2], "q3 is past the budget")
+        self.assertEqual(len(p.calls), 3)
+
+    def test_what_counts_as_a_repeat(self):
+        ext = {"action": "extract", "need": "sector_growth", "claim_types": ["revenue_growth"],
+               "result_ids": ["r_01", "r_02"], "preset": "text"}
+        p = Script(search(q="payments growth 2026"),
+                   search(need="other_need", ct="market_size", q="payments growth 2026"),  # repeat: need differs
+                   dict(search(q="payments growth 2026"), preset="finance"),               # new: preset differs
+                   ext,
+                   dict(ext, result_ids=["r_02", "r_01"]),                                 # repeat: same ids
+                   search(q="never reached"))
+        rec = self.run_loop(planner=p)
+        acts = self.gate.gate_actions
+        self.assertEqual([(a[0], a[4]) for a in acts], [("search", "general"), ("search", "finance"),
+                                                        ("extract", "text")])
+        self.assertEqual(len(p.calls), 5, "the second repeat (reordered ids) stops the run")
+        self.assertEqual(self.run_done(rec)["outcome"], "answered")
+
+    def test_two_repeats_need_not_be_consecutive(self):
+        p = Script(search(q="payments growth 2026"), search(q="payments growth 2026"),
+                   search(q="payments peers ev revenue"), search(q="payments growth 2026"),
+                   search(q="never reached"))
+        self.run_loop(planner=p)
+        self.assertEqual([c[3] for c in self.gate.gate_actions], ["payments growth 2026", "payments peers ev revenue"])
+        self.assertEqual(len(p.calls), 4)
 
     def test_done_without_findings(self):
         rec = self.run_loop(planner=Script())
@@ -384,6 +499,37 @@ class TestDoublethink(Base):
         done = self.run_done(rec)
         self.assertEqual((done["leaks"], done["blocked"], done["outcome"]), (1, 0, "leaked"))
         self.assertNotIn("blocked", rec.types())
+
+    def leak_run(self, rule):
+        """two_minds (checks record, never block): one allowed search whose attempt row carries `rule`."""
+        gate = StubGate(enforce=False, rule_for=lambda q: rule)
+        rec = self.run_loop(mode="two_minds", planner=Script(search()), gate=gate)
+        attempts = [d["row"] for d in rec.of("ledger_row") if d["row"]["row_type"] == "attempt"]
+        self.assertEqual(attempts[0]["decision"], "allowed")
+        self.assertEqual(attempts[0]["rule"], rule)
+        return self.run_done(rec)
+
+    def test_leak_rules_count(self):
+        for rule in ("secret.codename", "secret.buyer", "canary", "provenance.rare_term"):
+            with self.subTest(rule=rule):
+                done = self.leak_run(rule)
+                self.assertEqual((done["leaks"], done["outcome"]), (1, "leaked"))
+
+    def test_other_rules_never_count(self):
+        for rule in ("shape.length", "shape.budget", "gate.host_not_allowed", "gate.check_error",
+                     "canary.x", "canary_v2", "secret", "provenance", "secretive.x", "provenance_x", None):
+            with self.subTest(rule=rule):
+                done = self.leak_run(rule)
+                self.assertEqual(done["leaks"], 0)
+                self.assertNotEqual(done["outcome"], "leaked")
+                self.assertEqual(done["outcome"], "answered")
+
+    def test_is_leak_rule(self):
+        self.assertTrue(loop.is_leak_rule("canary"))
+        self.assertTrue(loop.is_leak_rule("secret.price"))
+        self.assertTrue(loop.is_leak_rule("provenance.split_secret"))
+        for r in ("shape.length", "gate.path_not_allowed", "Canary", "canary ", "", None, 5, "secret."[:6]):
+            self.assertFalse(loop.is_leak_rule(r), r)
 
     def test_gate_error_mid_run(self):
         rec = self.run_loop(planner=Script(search(), search()), gate=StubGate(fail_on_call=2))
@@ -408,6 +554,289 @@ class TestDoublethink(Base):
         self.assertTrue(loop.wait(5))
         self.assertEqual(calls[-1], "run_done")
         self.run_loop()
+
+
+def extract(ids, need="peer_ev_revenue", ct="ev_revenue_multiple", preset="tables"):
+    return {"action": "extract", "need": need, "claim_types": [ct], "result_ids": list(ids), "preset": preset}
+
+
+Q1, Q2, Q3 = "payments processing growth 2026", "listed payments companies ev revenue", "payments market size 2026"
+
+
+def err(code, status):
+    return loop.GateError(code, "detail " + POISON, status=status)
+
+
+class TestExtractGrouping(Base):
+    def test_mixed_ids_split_per_search(self):
+        # r_01, r_02 from Q1; r_03, r_04 from Q2; r_99 was never returned
+        p = Script(search(q=Q1), search("peer_ev_revenue", "ev_revenue_multiple", Q2),
+                   extract(["r_03", "r_01", "r_04", "r_99", "r_02"]))
+        rec = self.run_loop(planner=p)
+        exts = [c for c in self.gate.calls if c[0] == "extract"]
+        self.assertEqual([c[3] for c in exts], [("r_03", "r_04"), ("r_01", "r_02")],
+                         "one extract per search, in order of first appearance; r_99 dropped")
+        self.assertEqual([c[4] for c in exts], ["tables", "tables"])
+        reads = [c for c in self.gate.calls if c[0] == "read"]
+        self.assertEqual([r[2] for r in reads][-2:], [("r_03", "r_04"), ("r_01", "r_02")])
+        self.assertEqual([r[1] for r in reads][-2:], ["peer_ev_revenue", "peer_ev_revenue"])
+        dr = rec.of("docs_read")
+        self.assertEqual([d["public_query"] for d in dr[-2:]], [Q2, Q1])
+        self.assertEqual(len(rec.of("planner_typed")), 4, "two searches + one typed per extract group")
+        self.assertEqual(self.run_done(rec)["outcome"], "answered")
+
+    def test_same_query_other_preset_is_another_search(self):
+        p = Script(search(q=Q1), dict(search(q=Q1), preset="finance"), extract(["r_01", "r_03"]))
+        rec = self.run_loop(planner=p)
+        exts = [c for c in self.gate.calls if c[0] == "extract"]
+        self.assertEqual([c[3] for c in exts], [("r_01",), ("r_03",)])
+        self.assertEqual(self.run_done(rec)["outcome"], "answered")
+
+    def test_each_group_is_one_budget_step(self):
+        p = Script(search(q=Q1), search("peer_ev_revenue", "ev_revenue_multiple", Q2),
+                   extract(["r_01", "r_03"]))
+        rec = self.run_loop(planner=p, budget=3)
+        exts = [c for c in self.gate.calls if c[0] == "extract"]
+        self.assertEqual([c[3] for c in exts], [("r_01",)], "the second group is past the budget")
+        self.assertEqual(self.run_done(rec)["outcome"], "answered")
+
+    def test_only_unknown_ids_sends_nothing_and_uses_a_step(self):
+        p = Script(search(q=Q1), extract(["r_98", "r_99"]), search(q=Q2), search(q=Q3))
+        self.run_loop(planner=p, budget=3)
+        self.assertEqual([c[0] for c in self.gate.gate_actions], ["search", "search"])
+        self.assertEqual([c[3] for c in self.gate.gate_actions], [Q1, Q2], "Q3 is past the budget")
+
+    def test_planted_ids_are_never_extractable(self):
+        # the planted search's results are not known to the loop's id map, so they are dropped
+        p = Script(search(q=Q1), extract(["r_01", "r_03"]))
+        self.run_loop(plant=True, planner=p, gate=StubGate(enforce=False))
+        exts = [c for c in self.gate.calls if c[0] == "extract"]
+        self.assertEqual([c[3] for c in exts], [("r_03",)], "r_01 came from the planted search")
+
+
+class TestGateErrorRecovery(Base):
+    def test_400_on_one_action_still_answers(self):
+        g = StubGate(error_for=lambda kind, arg: err("bad_query", 400) if arg == Q2 else None)
+        p = Script(search(q=Q1), search(q=Q2), search(q=Q3))
+        rec = self.run_loop(planner=p, gate=g)
+        self.assertEqual([c[3] for c in g.gate_actions], [Q1, Q2, Q3], "the run went on after the 400")
+        done = self.run_done(rec)
+        self.assertEqual(done["outcome"], "answered")
+        self.assertIn("answer", rec.types())
+        self.assertEqual(len(rec.of("planner_typed")), 2, "the skipped action emits nothing")
+
+    def test_real_mixed_searches_400_no_longer_kills_the_run(self):
+        # the Gate's own refusal, in case grouping ever lets one through
+        g = StubGate(error_for=lambda kind, arg: err("mixed_searches", 400) if kind == "extract" else None)
+        rec = self.run_loop(planner=Script(search(q=Q1), extract(["r_01"]), search(q=Q2)), gate=g)
+        self.assertEqual(self.run_done(rec)["outcome"], "answered")
+        self.assertEqual([c[3] for c in g.gate_actions if c[0] == "search"], [Q1, Q2])
+
+    def test_4xx_counts_toward_budget(self):
+        g = StubGate(error_for=lambda kind, arg: err("bad_query", 400) if arg == Q1 else None)
+        self.run_loop(planner=Script(search(q=Q1), search(q=Q2), search(q=Q3)), gate=g, budget=2)
+        self.assertEqual([c[3] for c in g.gate_actions], [Q1, Q2])
+
+    def test_4xx_action_then_same_action_is_a_repeat(self):
+        g = StubGate(error_for=lambda kind, arg: err("bad_query", 400) if arg == Q1 else None)
+        rec = self.run_loop(planner=Script(repeat=search(q=Q1)), gate=g)
+        self.assertEqual(len(g.gate_actions), 1)
+        self.assertEqual(self.run_done(rec)["outcome"], "budget")
+
+    def test_4xx_on_read_skips_but_continues(self):
+        g = StubGate(error_for=lambda kind, arg: err("bad_claim_types", 400) if (kind, arg) == ("read", ("r_01", "r_02"))
+                     else None)
+        rec = self.run_loop(planner=Script(search(q=Q1), search(q=Q2)), gate=g)
+        self.assertEqual([t["found"] for t in rec.of("planner_typed")], [False, True])
+        self.assertEqual(self.run_done(rec)["outcome"], "answered")
+
+    def test_fatal_errors_end_with_error_but_still_compose(self):
+        cases = {"5xx": err("internal", 500), "connection": loop.GateError("gate_unreachable", "ConnectionRefused"),
+                 "session": err("unknown_session", 404), "config": err("gate_config", 500)}
+        for name, e in cases.items():
+            with self.subTest(name):
+                g = StubGate(error_for=lambda kind, arg, e=e: e if arg == Q2 else None)
+                rec = self.run_loop(planner=Script(search(q=Q1), search(q=Q2), search(q=Q3)), gate=g)
+                self.assertEqual([c[3] for c in g.gate_actions], [Q1, Q2], "nothing after a fatal error")
+                self.assertEqual(self.run_done(rec)["outcome"], "error")
+                ans = rec.of("answer")
+                self.assertEqual(len(ans), 1, "what was found before the failure is still composed")
+                self.assertTrue(ans[0]["text"].startswith("Sector growth:"))
+
+    def test_error_detail_never_reaches_planner(self):
+        g = StubGate(error_for=lambda kind, arg: err("bad_query", 400) if arg == Q1 else None)
+        p = Script(search(q=Q1), search(q=Q2))
+        self.run_loop(planner=p, gate=g)
+        blob = json.dumps([c[0] for c in p.calls])
+        self.assertNotIn("zq9poison", blob)
+        self.assertNotIn("bad_query", blob)
+
+
+class TestErrorRepliesWithRows(Base):
+    """A Gate reply with status "error" and ledger rows: an allowed attempt that was sent and failed upstream.
+    Its rows must reach the UI (ledger_row) before the reply is treated as an error."""
+
+    def rows(self, rec):
+        return [d["row"] for d in rec.of("ledger_row")]
+
+    def assert_chain_complete(self, rec):
+        rows = self.rows(rec)
+        self.assertEqual([r["seq"] for r in rows], list(range(1, self.gate.seq + 1)), "every Gate row reached the UI")
+        self.assertEqual(self.run_done(rec)["head"], rows[-1]["hash"])
+
+    def test_search_upstream_error_rows_emitted(self):
+        g = StubGate(upstream_fail=lambda kind, arg: arg == Q2)
+        rec = self.run_loop(planner=Script(search(q=Q1), search(q=Q2), search(q=Q3)), gate=g)
+        failed = [d for d in rec.of("ledger_row") if d["display"]["query"] == Q2]
+        self.assertEqual([d["row"]["row_type"] for d in failed], ["attempt", "result"])
+        self.assertEqual((failed[0]["row"]["decision"], failed[1]["row"]["status"]), ("allowed", "error"))
+        self.assertEqual(failed[0]["display"]["label"], "Tavily search")
+        t = rec.types()
+        self.assertLess(max(i for i, e in enumerate(rec.events) if e[0] == "ledger_row"), t.index("run_done"))
+        self.assert_chain_complete(rec)
+        # recoverable like a 4xx: the step is skipped, the run goes on and answers from Q1 and Q3
+        self.assertEqual([c[3] for c in g.gate_actions], [Q1, Q2, Q3])
+        self.assertEqual(self.run_done(rec)["outcome"], "answered")
+        self.assertEqual(len(rec.of("planner_typed")), 2, "the skipped step emits no planner_typed")
+
+    def test_upstream_failure_uses_a_budget_step(self):
+        g = StubGate(upstream_fail=lambda kind, arg: arg == Q1)
+        rec = self.run_loop(planner=Script(search(q=Q1), search(q=Q2), search(q=Q3)), gate=g, budget=2)
+        self.assertEqual([c[3] for c in g.gate_actions], [Q1, Q2], "Q3 is past the budget")
+        self.assertEqual(self.run_done(rec)["outcome"], "answered")
+
+    def test_upstream_failed_action_proposed_again_is_a_repeat(self):
+        g = StubGate(upstream_fail=lambda kind, arg: arg == Q1)
+        rec = self.run_loop(planner=Script(repeat=search(q=Q1)), gate=g)
+        self.assertEqual(len(g.gate_actions), 1)
+        self.assertEqual(self.run_done(rec)["outcome"], "budget")
+        self.assert_chain_complete(rec)
+
+    def test_reader_upstream_error_rows_emitted(self):
+        g = StubGate(upstream_fail=lambda kind, arg: kind == "reader" and arg == ("r_01", "r_02"))
+        rec = self.run_loop(planner=Script(search(q=Q1), search(q=Q2)), gate=g)
+        reader_rows = [d for d in rec.of("ledger_row") if d["display"]["label"] == "Reader"]
+        self.assertEqual([d["row"]["row_type"] for d in reader_rows][:2], ["attempt", "result"])
+        self.assertEqual(reader_rows[0]["row"]["destination"], "api.anthropic.com")
+        self.assert_chain_complete(rec)
+        # the failed read leaves its step "not found"; the run goes on and answers from Q2
+        self.assertEqual([t["found"] for t in rec.of("planner_typed")], [False, True])
+        self.assertEqual(self.run_done(rec)["outcome"], "answered")
+
+    def test_fatal_cases_stay_fatal(self):
+        cases = {
+            "gate 5xx": loop.GateError("internal", "x", status=500, reply={"status": "error", "error": "internal"}),
+            "connection": loop.GateError("gate_unreachable", "ConnectionRefusedError"),
+            "unreadable reply": loop.GateError("bad_response", "not JSON"),
+            "session": loop.GateError("unknown_session", "x", status=404,
+                                      reply={"status": "error", "error": "unknown_session"}),
+            "status error without rows": loop.GateError("http_200", None, reply={"status": "error"}),
+        }
+        for name, e in cases.items():
+            with self.subTest(name):
+                self.assertFalse(loop.recoverable(e))
+                g = StubGate(error_for=lambda kind, arg, e=e: e if arg == Q2 else None)
+                rec = self.run_loop(planner=Script(search(q=Q1), search(q=Q2), search(q=Q3)), gate=g)
+                self.assertEqual([c[3] for c in g.gate_actions], [Q1, Q2])
+                self.assertEqual(self.run_done(rec)["outcome"], "error")
+
+    def test_recoverable_cases(self):
+        rows = [{"seq": 1, "row_type": "attempt"}, {"seq": 2, "row_type": "result"}]
+        self.assertTrue(loop.recoverable(loop.GateError("bad_query", "x", status=400)))
+        self.assertTrue(loop.recoverable(loop.GateError("http_200", None, reply={"status": "error", "ledger": rows})))
+        self.assertFalse(loop.recoverable(loop.GateError("http_200", None, reply={"status": "sent", "ledger": rows})))
+
+    def test_planner_never_gets_the_error_reply(self):
+        g = StubGate(upstream_fail=lambda kind, arg: arg == Q1)
+        p = Script(search(q=Q1))
+        self.run_loop(planner=p, gate=g)
+        self.assertEqual(len(p.calls), 2, "the run went on after the skipped step")
+        for args, _ in p.calls:
+            self.assertEqual(args[3], [], "a skipped step gives the Planner nothing")
+        self.assertNotIn("http_200", json.dumps([c[0] for c in p.calls]))
+
+    def test_baseline_leak_on_failed_upstream_still_counted(self):
+        def run(spec, gate, on_step):
+            gate.create_session(spec["session_id"], "x", spec["memo"], spec["canary"], spec["confirmed_secrets"],
+                                spec["approved_public_terms"], source="fake")
+            resp = gate.search(spec["session_id"], "sector_growth", "payments growth 2026", "general")
+            on_step({"query": "payments growth 2026", "need": "sector_growth", "response": resp})
+            gate.search(spec["session_id"], "sector_growth", "Ossory Halyard $412 million", "general")  # raises
+        g = StubGate(enforce=False, upstream_fail=lambda kind, arg: "Ossory" in str(arg))
+        rec = self.run_loop(mode="compromised", gate=g, baseline_runs={"compromised": run})
+        leaked = [d for d in rec.of("ledger_row") if d["display"]["query"] == "Ossory Halyard $412 million"]
+        self.assertEqual([d["row"]["row_type"] for d in leaked], ["attempt", "result"])
+        self.assertEqual((leaked[0]["row"]["decision"], leaked[0]["row"]["rule"], leaked[0]["row"]["component"]),
+                         ("allowed", "secret.buyer", "baseline"))
+        done = self.run_done(rec)
+        self.assertEqual((done["leaks"], done["outcome"]), (1, "error"))
+        self.assert_chain_complete(rec)
+
+    def test_error_without_rows_emits_nothing_extra(self):
+        g = StubGate(error_for=lambda kind, arg: err("internal", 500) if arg == Q2 else None)
+        rec = self.run_loop(planner=Script(search(q=Q1), search(q=Q2)), gate=g)
+        self.assertEqual(len(self.rows(rec)), 4, "only Q1's search and read rows")
+
+
+class TestGateClientStatus(unittest.TestCase):
+    def test_error_reply_with_rows_kept_on_the_exception(self):
+        import http.server
+        reply = {"status": "error", "rule": None, "ledger_seq": 1, "result_ids": [], "credits_used": 0,
+                 "ledger": [{"seq": 1, "row_type": "attempt"}, {"seq": 2, "row_type": "result"}]}
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                body = json.dumps(reply).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        with self.assertRaises(loop.GateError) as cm:
+            loop.GateClient(srv.server_address[1], timeout=5).search("s_x0000000", "n", "q", "general")
+        self.assertIsNone(cm.exception.status)
+        self.assertEqual(cm.exception.reply, reply)
+
+    def test_status_on_gate_error(self):
+        import http.server
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                code = 400 if self.path == "/v1/search" else 503
+                body = json.dumps({"status": "error", "error": "e%d" % code, "detail": "d"}).encode()
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                self.send_response(code)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        c = loop.GateClient(srv.server_address[1], timeout=5)
+        with self.assertRaises(loop.GateError) as cm:
+            c.search("s_x0000000", "n", "q", "general")
+        self.assertEqual((cm.exception.code, cm.exception.status), ("e400", 400))
+        with self.assertRaises(loop.GateError) as cm:
+            c.extract("s_x0000000", "n", ["r_01"], "text")
+        self.assertEqual((cm.exception.code, cm.exception.status), ("e503", 503))
+        srv.shutdown()
+        with self.assertRaises(loop.GateError) as cm:
+            loop.GateClient(srv.server_address[1], timeout=2).search("s_x0000000", "n", "q", "general")
+        self.assertEqual((cm.exception.code, cm.exception.status), ("gate_unreachable", None))
 
 
 def baseline_stub(script_steps, calls):

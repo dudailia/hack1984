@@ -22,6 +22,11 @@ class BuildRequestTest(unittest.TestCase):
         self.assertTrue(req["messages"][0]["content"].endswith("SYS"))
         self.assertEqual(req["messages"][1]["content"], "USER")
 
+    def test_date_not_repeated_when_prompt_already_states_it(self):
+        sys_text = "Today is 2026-11-07. The current year is 2026. SYS"
+        req = ollama.build_request("qwen3:8b", datetime.date(2026, 11, 7), sys_text, "USER")
+        self.assertEqual(req["messages"][0]["content"], sys_text)
+
     def test_schema_is_json_schema_for_search_or_done(self):
         s = ollama.ACTION_SCHEMA
         self.assertEqual(s["type"], "object")

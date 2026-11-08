@@ -1,6 +1,12 @@
+import io
+import json
 import os
+import re
 import tempfile
+import threading
 import unittest
+import urllib.request
+from unittest import mock
 
 from fake_tavily import server as fake_server
 from fake_tavily.tests.helpers import (
@@ -224,3 +230,46 @@ class PortTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RequestLogTest(unittest.TestCase):
+    """Every request log line carries a UTC ISO 8601 timestamp with milliseconds."""
+
+    LINE = re.compile(r'^fake_tavily (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z) "(GET|POST) (\S+) HTTP/1\.1" (\d{3}) ')
+
+    def test_timestamp_on_every_line(self):
+        srv = fake_server.make_server(port=0, verbose=True)
+        threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        base = "http://127.0.0.1:%d" % srv.server_address[1]
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            for path, body in (("/health", None), ("/search", {"query": GROWTH_QUERY}), ("/nope", {})):
+                data = None if body is None else json.dumps(body).encode()
+                req = urllib.request.Request(base + path, data=data, headers={"Authorization": "Bearer tvly-x"})
+                try:
+                    with urllib.request.urlopen(req, timeout=5) as resp:
+                        resp.read()
+                except urllib.error.HTTPError as e:
+                    with e:  # an unclosed HTTPError is a ResourceWarning on stderr (Python 3.14)
+                        e.read()
+        # only the server's own lines; the interpreter may write warnings to the same stderr
+        lines = [line for line in err.getvalue().splitlines() if line.startswith("fake_tavily")]
+        self.assertEqual(len(lines), 3, lines)
+        for line, path in zip(lines, ("/health", "/search", "/nope")):
+            m = self.LINE.match(line)
+            self.assertIsNotNone(m, line)
+            self.assertEqual(m.group(3), path)
+            self.assertNotIn("tvly", line)
+        self.assertEqual([self.LINE.match(l).group(4) for l in lines], ["200", "200", "404"])
+
+    def test_quiet_unless_verbose(self):
+        srv = fake_server.make_server(port=0)
+        threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            urllib.request.urlopen("http://127.0.0.1:%d/health" % srv.server_address[1], timeout=5).read()
+        self.assertEqual(err.getvalue(), "")
