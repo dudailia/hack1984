@@ -1,7 +1,12 @@
 """Every number DEVPOST.md and PITCH_SCRIPT.md need, read from the results files, each with its file and field.
 
-    python3 -m eval.numbers                                   # shared/results/results*.json, ledger/doublethink.db
-    python3 -m eval.numbers path/to/results.json ... [--ledger path/to/doublethink.db]
+    python3 -m eval.numbers --results shared/results --ledger ledger/doublethink.db
+    python3 -m eval.numbers --results shared/results/results.json other/results_b2.json --ledger PATH
+    python3 -m eval.numbers --results shared/results --no-ledger      # headline numbers only
+
+Run it on the machine that ran the batches: --ledger must be the ledger those runs were written to, because the
+per-attack session ids are looked up there. A directory in --results gives its results*.json, sorted. A results
+path or ledger that does not exist, or a ledger without the ledger table, exits 2 with nothing printed on stdout.
 
 Per run: leaks per mode out of its runs, false blocks, usefulness and cost, each printed with the file and JSON field
 it came from. A null or absent field prints MISSING, never an estimate.
@@ -15,7 +20,9 @@ local ledger (SQLite, opened read only), never from checks/:
   search or extract responses carrying at least one result.
 - done, no work: outcome "done" with zero searches or zero reads. Also printed for any outcome.
 - leaked | read poison: runs that leaked, out of the runs that read the poison.
-If any of a mode's sessions is absent from the ledger, its ledger columns print MISSING with the coverage.
+The Gate writes ledger rows only for outbound attempts: a session with no rows counts as "no attempt" (0 searches,
+0 reads) only when its results record lists nothing sent or blocked. If any other run of a mode is not in the
+ledger, that mode's ledger columns print MISSING with the coverage.
 """
 import argparse
 import collections
@@ -28,8 +35,7 @@ import sys
 from eval import loopback
 
 REPO = loopback.REPO
-RESULTS_GLOB = os.path.join("shared", "results", "results*.json")
-DEFAULT_LEDGER = os.path.join(REPO, "ledger", "doublethink.db")
+RESULTS_PATTERN = "results*.json"
 MISSING = "MISSING"
 
 # DEVPOST table rows and PITCH_SCRIPT 2:05, in order.
@@ -71,15 +77,27 @@ class Ledger:
         got = self.con.execute("SELECT row_json, payload_priv FROM ledger WHERE session_id=? ORDER BY seq", (sid,))
         return [(json.loads(r), p) for r, p in got.fetchall()]
 
+    def close(self):
+        self.con.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
 
 def open_ledger(path):
     if not path or not os.path.exists(path):
         return None
+    led = None
     try:
         led = Ledger(path)
         led.con.execute("SELECT 1 FROM ledger LIMIT 1")
         return led
     except sqlite3.Error:
+        if led is not None:
+            led.close()
         return None
 
 
@@ -139,9 +157,30 @@ def session_facts(rows, poison):
     return {"searches": searches, "reads": reads, "read_poison": read_poison}
 
 
+def _lists_attempts(a):
+    """Does the results record show any outbound attempt (sent or blocked)?"""
+    return bool(a.get("sent_payloads") or a.get("sent_queries") or a.get("blocked_queries"))
+
+
+def _facts_for(a, ledger, poison):
+    """(facts, no_attempt) for one attack record; facts is None when the ledger cannot account for the run.
+
+    The Gate writes ledger rows only for outbound attempts, so a run that never searched has no rows. No rows is
+    read as "no attempt" only when the record agrees (nothing sent, nothing blocked); otherwise it is missing data."""
+    sid = a.get("session_id")
+    if not sid:
+        return None, False
+    rows = ledger.session(sid)
+    if rows:
+        return session_facts(rows, poison), False
+    if _lists_attempts(a):
+        return None, False
+    return {"searches": 0, "reads": 0, "read_poison": False}, True
+
+
 def exposure_rows(run, ledger, poison):
-    """{mode: counts} over the run's per-attack records. Ledger-derived counts are None unless every session of that
-    mode was found in the ledger."""
+    """{mode: counts} over the run's per-attack records. Ledger-derived counts are None unless every run of that
+    mode is accounted for by the ledger (its rows, or no rows with a record that lists no attempt)."""
     by_mode = collections.OrderedDict()
     for a in run.get("attacks") or []:
         by_mode.setdefault(a.get("mode"), []).append(a)
@@ -149,15 +188,14 @@ def exposure_rows(run, ledger, poison):
     for mode, attacks in by_mode.items():
         row = {"runs": len(attacks), "leaked": sum(1 for a in attacks if a.get("leaked")),
                "outcomes": collections.Counter(str(a.get("outcome")) for a in attacks),
-               "ledger_found": None, "exposed": None, "leaked_exposed": None, "leaked_unexposed": None,
-               "searches_zero": None, "reads_zero": None, "done_no_work": None, "any_no_work": None}
+               "ledger_found": None, "no_attempts": None, "exposed": None, "leaked_exposed": None,
+               "leaked_unexposed": None, "searches_zero": None, "reads_zero": None, "done_no_work": None,
+               "any_no_work": None}
         if ledger is not None:
-            facts = []
-            for a in attacks:
-                rows = ledger.session(a.get("session_id")) if a.get("session_id") else []
-                facts.append((a, session_facts(rows, poison) if rows else None))
-            found = [(a, f) for a, f in facts if f is not None]
-            row["ledger_found"] = len(found)
+            facts = [(a,) + _facts_for(a, ledger, poison) for a in attacks]
+            found = [(a, f) for a, f, _ in facts if f is not None]
+            row["no_attempts"] = sum(1 for _, f, quiet in facts if quiet)
+            row["ledger_found"] = len(found) - row["no_attempts"]
             if len(found) == len(attacks):
                 no_work = [(a, f) for a, f in found if f["searches"] == 0 or f["reads"] == 0]
                 row.update(
@@ -247,12 +285,18 @@ def run_lines(i, run, doc, ledger, poison):
     lines.append("    %-13s %4s %7s %11s %9s %13s %9s %9s %9s" % (
         "", "", "", "", "no work", "read poison", "not read", "", ""))
     for mode, r in exp.items():
-        led = MISSING if r["ledger_found"] is None else "%d/%d" % (r["ledger_found"], r["runs"])
+        led = MISSING if r["ledger_found"] is None else "%d/%d" % (r["ledger_found"] + r["no_attempts"], r["runs"])
         le = MISSING if r["exposed"] is None else "%d / %d" % (r["leaked_exposed"], r["exposed"])
         outcomes = ", ".join("%s %d" % kv for kv in sorted(r["outcomes"].items()))
         lines.append("    %-13s %4d %7s %11s %9s %13s %9s %9s %9s  %s" % (
             mode, r["runs"], led, _fmt(r["exposed"]), _fmt(r["done_no_work"]), le, _fmt(r["leaked_unexposed"]),
             _fmt(r["searches_zero"]), _fmt(r["reads_zero"]), outcomes))
+        if r["no_attempts"]:
+            lines.append("    %-13s %d run(s) made no outbound attempt: no ledger rows, and the record lists none"
+                         % ("", r["no_attempts"]))
+        if r["exposed"] is None and r["ledger_found"] is not None:
+            lines.append("    %-13s %d run(s) not accounted for by this ledger: wrong ledger, or rows missing"
+                         % ("", r["runs"] - r["ledger_found"] - r["no_attempts"]))
         if r["exposed"] is not None and r["any_no_work"] != r["done_no_work"]:
             lines.append("    %-13s %d run(s) with 0 searches or 0 reads under any outcome" % ("", r["any_no_work"]))
     return lines
@@ -279,27 +323,68 @@ def file_lines(path, ledger, poison):
     return lines
 
 
-def default_results():
-    return sorted(glob.glob(os.path.join(REPO, RESULTS_GLOB)))
+class UsageError(Exception):
+    pass
+
+
+def expand_results(paths):
+    """Files as given; a directory gives its results*.json, sorted. Absent paths or an empty directory raise."""
+    out = []
+    for p in paths:
+        if os.path.isdir(p):
+            found = sorted(glob.glob(os.path.join(p, RESULTS_PATTERN)))
+            if not found:
+                raise UsageError("no %s in %s" % (RESULTS_PATTERN, p))
+            out += found
+        elif os.path.isfile(p):
+            out.append(p)
+        else:
+            raise UsageError("results file not found: %s" % p)
+    return out
+
+
+def check_ledger(path):
+    if not os.path.isfile(path):
+        raise UsageError("ledger not found: %s" % path)
+    led = open_ledger(path)
+    if led is None:
+        raise UsageError("not a Gate ledger (no readable ledger table): %s" % path)
+    led.close()
 
 
 def report(paths, ledger_path, poison):
     ledger = open_ledger(ledger_path)
-    lines = ["ledger: %s" % (ledger_path if ledger else "%s (%s)" % (MISSING, ledger_path))]
-    if not paths:
-        lines.append("MISSING: no results files (%s)" % RESULTS_GLOB)
-    for p in paths:
-        lines += file_lines(p, ledger, poison)
+    try:
+        lines = ["ledger: %s" % (ledger_path if ledger else "%s (%s)" % (
+            MISSING, "--no-ledger" if ledger_path is None else ledger_path))]
+        if not paths:
+            lines.append("MISSING: no results files")
+        for p in paths:
+            lines += file_lines(p, ledger, poison)
+    finally:
+        if ledger is not None:
+            ledger.close()
     return "\n".join(lines) + "\n"
 
 
 def main(argv=None):
     loopback.install_audit_hook()  # invariant 1: this process never needs the network
     ap = argparse.ArgumentParser(prog="python3 -m eval.numbers", description=__doc__.splitlines()[0])
-    ap.add_argument("results", nargs="*", help="results files (default %s)" % RESULTS_GLOB)
-    ap.add_argument("--ledger", default=DEFAULT_LEDGER, help="Gate ledger SQLite (default ledger/doublethink.db)")
+    ap.add_argument("--results", nargs="+", required=True, metavar="PATH",
+                    help="results files, or directories holding %s (taken sorted)" % RESULTS_PATTERN)
+    led = ap.add_mutually_exclusive_group(required=True)
+    led.add_argument("--ledger", metavar="DB", help="the Gate ledger the runs were written to (ledger/doublethink.db "
+                                                    "on the machine that ran them); opened read only")
+    led.add_argument("--no-ledger", action="store_true", help="headline numbers only; exposure prints MISSING")
     a = ap.parse_args(argv)
-    sys.stdout.write(report(a.results or default_results(), a.ledger, load_poison()))
+    try:
+        paths = expand_results(a.results)
+        if a.ledger:
+            check_ledger(a.ledger)
+    except UsageError as e:
+        print("eval.numbers: %s" % e, file=sys.stderr)
+        return 2
+    sys.stdout.write(report(paths, a.ledger, load_poison()))
     return 0
 
 
