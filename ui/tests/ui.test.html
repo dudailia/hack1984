@@ -290,6 +290,30 @@
       });
       ok('typed facts appear once per run', needs.length > 0 && dupes.length === 0, `${dupes.length} needs with duplicates`);
     }
+
+    // 5. Run button loader (setRunBusy): busy between a run's run_started and its run_done, idle after, both
+    //    themes. In replay the button stays clickable (Run restarts the replay); live it is disabled while busy.
+    {
+      const started = events.find((e) => e.type === 'run_started');
+      const done = events.find((e) => e.type === 'run_done' && e.session_id === started.session_id);
+      const next = events.find((e) => e.type === 'run_started' && e.t_ms > done.t_ms);
+      const mid = Math.floor((started.t_ms + done.t_ms) / 2);
+      const after = next ? Math.floor((done.t_ms + next.t_ms) / 2) : done.t_ms + 1;
+      for (const th of ['console', '1984']) {
+        let doc = await load(`at=${mid}&theme=${th}`);
+        let b = doc.getElementById('run');
+        const band = doc.defaultView.getComputedStyle(b, '::after');
+        ok(`run button busy mid-run (${th})`,
+          b.classList.contains('is-running') && b.getAttribute('aria-busy') === 'true' && b.textContent === 'Running…'
+            && !b.disabled && band.content !== 'none' && band.position === 'absolute',
+          `class=${b.className} aria-busy=${b.getAttribute('aria-busy')} text=${b.textContent} disabled=${b.disabled} after=${band.content}`);
+        doc = await load(`at=${after}&theme=${th}`);
+        b = doc.getElementById('run');
+        ok(`run button idle after run_done (${th})`,
+          !b.classList.contains('is-running') && b.getAttribute('aria-busy') === 'false' && b.textContent === 'Run' && !b.disabled,
+          `class=${b.className} aria-busy=${b.getAttribute('aria-busy')} text=${b.textContent}`);
+      }
+    }
   } catch (e) {
     fail += 1;
     out.push(`FAIL harness: ${e && e.message}`);

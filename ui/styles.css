@@ -95,6 +95,22 @@ button:hover:not(:disabled) { background: var(--sunken); }
 button:disabled { cursor: default; color: var(--muted); box-shadow: none; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #FFFFFF; font-weight: 600; }
 button.primary:hover:not(:disabled) { background: #4338CA; }
+/* Run button loader (setRunBusy in app.js): while a run is going, a light band slides across the button.
+   Transform only, the page's one easing curve; under prefers-reduced-motion the band stands still. */
+#run { position: relative; overflow: hidden; min-width: 7.5em; }
+#run.is-running { cursor: progress; }
+#run.is-running:disabled { color: #FFFFFF; }   /* keep the primary look while it is disabled */
+#run.is-running::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(90deg, transparent 0%, currentColor 50%, transparent 100%);
+  opacity: 0.3;
+  transform: translateX(-100%);
+  animation: run-band 1.4s var(--ease) infinite;
+}
+@keyframes run-band { to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) {
+  #run.is-running::after { animation: none; transform: none; opacity: 0.2; }
+}
 button.secondary { font-weight: 500; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 input[type="number"] { width: 4.5rem; cursor: text; box-shadow: none; }
