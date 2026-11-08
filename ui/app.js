@@ -681,7 +681,11 @@
 
   // A web page as a mini browser window: tab, address bar, then the page (DESIGN.md "Materials").
   function docNode(doc, animate) {
-    const hl = doc.highlights || [];
+    // The emitter's highlights when it sends them; otherwise the page's own sentences addressed to AI assistants
+    // (RunView.plantedSentences), so the poisoned page is marked in every replay.
+    const given = Array.isArray(doc.highlights) ? doc.highlights : [];
+    const hl = given.length ? given : (window.RunView ? window.RunView.plantedSentences(doc.excerpt || '') : [])
+      .map((text) => ({ text, label: 'planted instruction (marked by the page)' }));
     const { host, path } = splitUrl(doc.url);
     return el('article', { class: `browser${hl.length ? ' has-planted' : ''}${animate ? ' fade' : ''}`, 'aria-label': `Web page ${doc.result_id}` },
       el('div', { class: 'tabbar' },

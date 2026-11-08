@@ -599,6 +599,44 @@
       ok('workspace: loads nothing from outside its origin', doc.defaultView.performance.getEntriesByType('resource').every((e) => new URL(e.name).hostname === '127.0.0.1'), 'external resource');
     }
 
+    // ---------- poisoned page: the hidden instruction is marked and stays in view ----------
+    {
+      const V = window.RunView;
+      const docs = events.filter((e) => e.type === 'docs_read').flatMap((e) => (e.data.docs || []).map((d) => ({ ev: e, d })));
+      const given = docs.filter((x) => (x.d.highlights || []).length);
+      const wrong = given.filter((x) => JSON.stringify(V.plantedSentences(x.d.excerpt)) !== JSON.stringify(x.d.highlights.map((h) => h.text)));
+      ok('plantedSentences finds exactly the emitter\'s highlights', wrong.length === 0, `${wrong.length} of ${given.length} differ`);
+      const planted = docs.filter((x) => (x.d.highlights || []).length || V.plantedSentences(x.d.excerpt).length);
+      const urls = new Set(planted.map((x) => x.d.url));
+      ok('one poisoned page in the replay, marked', planted.length > 0 && urls.size === 1, `${planted.length} docs, urls ${[...urls].join(', ')}`);
+      ok('plantedSentences returns exact substrings', planted.every((x) => (x.d.highlights && x.d.highlights.length ? x.d.highlights.map((h) => h.text) : V.plantedSentences(x.d.excerpt)).every((t) => x.d.excerpt.includes(t))), 'not a substring');
+
+      // In the Reader room, from each reader job that holds the poisoned page until the run's next job or its end,
+      // the marked line is inside the room's visible area.
+      const inView = (doc) => {
+        const box = doc.getElementById('reader-body');
+        const marks = [...box.querySelectorAll('mark.planted')].filter((m) => visible(doc, m));
+        const r = box.getBoundingClientRect();
+        return marks.some((m) => { const b = m.getBoundingClientRect(); return b.bottom > r.top + 4 && b.top < r.bottom - 4; });
+      };
+      const misses = [];
+      let checked = 0;
+      const readerJobs = events.filter((e) => e.type === 'docs_read' && e.data.by === 'reader'
+        && (e.data.docs || []).some((d) => (d.highlights || []).length || V.plantedSentences(d.excerpt).length));
+      for (const e of readerJobs) {
+        const later = events.filter((x) => x.session_id === e.session_id && x.t_ms >= e.t_ms
+          && (x.t_ms === e.t_ms || !(x.type === 'docs_read' && x.t_ms > e.t_ms)));
+        const stop = events.find((x) => x.session_id === e.session_id && x.type === 'docs_read' && x.t_ms > e.t_ms);
+        // proof_result opens the proof panel in the Reader room's place, so those moments are not Reader-room views.
+        for (const x of later.filter((y) => (!stop || y.t_ms < stop.t_ms) && y.type !== 'proof_result')) {
+          const d = await load(`at=${x.t_ms}&theme=console`);
+          checked += 1;
+          if (!inView(d)) misses.push(`${x.type}@${x.t_ms}`);
+        }
+      }
+      ok(`poisoned page stays in view in the Reader room (${checked} seeks)`, readerJobs.length > 0 && misses.length === 0, misses.join(', '));
+    }
+
     // ---------- regression: the four fixes on main ----------
     // 1. The canary is never rendered, at any event time, in either theme.
     const canaries = [...new Set(events.filter((e) => e.type === 'memo_loaded').map((e) => e.data.canary).filter(Boolean))];

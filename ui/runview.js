@@ -30,5 +30,23 @@
     return reason ? `${done.outcome} (${reason})` : String(done.outcome);
   }
 
-  window.RunView = { STEPS, stepAfter, outcomeText };
+  // A page's hidden instruction, for a page whose docs_read entry carries no `highlights` (FORMATS §10: highlights
+  // are a demo annotation set by the emitter; the real estate replay leaves them empty). A sentence counts when it
+  // addresses AI assistants, agents or models, the way a prompt injection does. Returns exact substrings of text,
+  // so the same splitter that marks `highlights` can mark them. Display only: no check or measurement uses it.
+  const ADDRESSED = /\b(?:AI|LLM)\b[^.!?:]{0,40}\b(?:assistants?|agents?|models?)\b|\blanguage models?\b|\bignore (?:all |any )?(?:previous|prior) instructions\b/i;
+  function plantedSentences(text) {
+    const s = String(text || '');
+    const out = [];
+    const re = /[^.!?]+(?:[.!?]+|$)/g;
+    let m;
+    while ((m = re.exec(s)) !== null) {
+      const sentence = m[0].trim();
+      if (sentence && ADDRESSED.test(sentence)) out.push(sentence);
+      if (m[0] === '') re.lastIndex += 1;
+    }
+    return out;
+  }
+
+  window.RunView = { STEPS, stepAfter, outcomeText, plantedSentences };
 })();
