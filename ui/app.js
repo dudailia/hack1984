@@ -94,7 +94,7 @@
     if (!S.sessions[sid]) {
       S.sessions[sid] = {
         rows: [], typed: [], typedKeys: new Set(), urls: {}, secrets: [], secretsReady: false, canary: null, mode: null, source: null, careless: false,
-        memo: '', title: '', sha: '', answer: null, done: null,
+        memo: '', title: '', sha: '', answer: null, done: null, step: 0,
         m: { leaks: 0, blocked: 0, credits: 0, seconds: null },
       };
     }
@@ -227,7 +227,7 @@
     const s = S.view && S.sessions[S.view];
     if (s && s.source === 'real') b.textContent = 'SOURCE: api.tavily.com (real)';
     else if (s && s.source === 'fake') b.textContent = 'SOURCE: LOCAL STAND-IN (fake)';
-    else b.textContent = 'SOURCE: —';
+    else b.textContent = 'SOURCE: n/a';
     b.title = b.textContent;
     const pill = $('#session-pill');
     pill.hidden = !(S.view && s);
@@ -240,7 +240,7 @@
     if (!s) return [];
     const bits = [s.mode, s.source];
     if (s.careless) bits.push('careless query');
-    if (s.done) bits.push(s.done.outcome);
+    if (s.done) bits.push(window.RunView.outcomeText(s.done));
     return bits.filter(Boolean);
   }
   const runDescription = (sid) => [sid, ...runBits(sid)].join(' · ');
@@ -250,7 +250,7 @@
   function renderGateHead() {
     const single = S.uiMode === 'single';
     const s = S.view && S.sessions[S.view];
-    fill($('#gate-title'), single ? dual('Outbound', 'Outbound') : dual('The gate', 'Egress gate'));
+    fill($('#gate-title'), single ? dual('Outbound', 'Outbound') : dual('The gate', 'The gate'));
     let sub = 'the only way out';
     if (single) sub = 'recorded, not enforced';
     else if (s && s.mode === 'two_minds') sub = 'recording only · not enforcing';
@@ -331,7 +331,7 @@
     setCounter('#m-leaks', m.leaks, animate);
     setCounter('#m-blocked', m.blocked, animate);
     setCounter('#m-credits', m.credits, animate);
-    setCounter('#m-seconds', m.seconds == null ? '—' : `${m.seconds} s`, false);
+    setCounter('#m-seconds', m.seconds == null ? 'n/a' : `${m.seconds} s`, false);
     $('#m-leaks').classList.toggle('hot', m.leaks > 0);
     $('#m-blocked').classList.toggle('hot', m.blocked > 0);
   }
@@ -345,9 +345,9 @@
     $('#answer-bar').disabled = !(s && s.answer);
     if (s && s.answer) t.textContent = s.answer.text || '';
     else if (s && s.done) {
-      t.textContent = `No answer. Run ended: ${s.done.outcome}.`;
+      t.textContent = `No answer. Run ended: ${window.RunView.outcomeText(s.done)}.`;
       t.classList.toggle('bad', s.done.outcome === 'leaked' || s.done.outcome === 'blocked');
-    } else t.textContent = '—';
+    } else t.textContent = 'n/a';
   }
 
   // ---------- Outbound panel (console theme): logic in outbound.js, numbers from the ledger events only ----------
@@ -367,7 +367,7 @@
         el('td', null, el('span', { class: `ob-decision ${a.decision}${leak ? ' leak' : ''}` }, a.decision === 'blocked' ? 'Blocked' : 'Sent')),
         el('td', null, a.rule
           ? el('span', { class: `ob-rule mono${a.decision === 'blocked' || leak ? ' bad' : ''}`, title: a.detail || a.rule }, a.rule)
-          : el('span', { class: 'ob-none' }, '—')));
+          : el('span', { class: 'ob-none' }, 'n/a')));
     });
     fill($('#ob-rows'), rows.length ? rows : el('tr', { class: 'ob-empty' }, el('td', { colspan: '5' }, 'No outbound attempts yet.')));
     fill($('#ob-run'), sid ? el('span', { class: 'mono' }, sid) : []);
@@ -382,8 +382,20 @@
     sc.scrollTop = sc.scrollHeight;   // the newest attempt is always in view
   }
 
-  // Everything that describes one run follows the ledger: answer bar, counters, badge, gate header, Outbound.
+  // ---------- step strip: the run's step from existing events only (ui/runview.js) ----------
+  function renderSteps(sid) {
+    if (sid !== S.view) return;
+    const step = sid && S.sessions[sid] ? S.sessions[sid].step : 0;
+    document.querySelectorAll('#steps li').forEach((li) => {
+      const n = Number(li.dataset.step);
+      li.classList.toggle('done', step > 0 && n < step);
+      if (n === step) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current');
+    });
+  }
+
+  // Everything that describes one run follows the ledger: answer bar, counters, badge, gate header, Outbound, steps.
   function showRunSummary(sid, animate = false) {
+    renderSteps(sid);
     renderAnswerBar(sid);
     renderOutbound(sid);
     renderCounters(sid, animate);
@@ -418,7 +430,7 @@
   // The memo as a paper dossier: typewriter header, ink stamp, marker redactions (DESIGN.md "Materials").
   function dossier(sid, redact) {
     const s = session(sid);
-    const subject = s.title || '—';
+    const subject = s.title || 'n/a';
     return el('article', { class: 'paper', 'aria-label': 'Confidential memo' },
       el('p', { class: 'tw t-classic' }, 'FILE 1984', s.sha ? `  ·  SHA ${shortHash(s.sha)}` : ''),
       el('p', { class: 'tw t-classic' }, 'SUBJECT: ', redacted(subject, sid, !redact)),
@@ -446,7 +458,7 @@
         [el('span', { class: 'mono' }, d.need), el('span', { class: 'ichip' }, d.found ? 'Found' : 'Not found')])),
       el('div', { class: 'chips' }, (d.values || []).map((v) => el('div', { class: 'chip' },
         el('div', { class: 'chip-top' }, el('span', { class: 'chip-num' }, String(v.value)), el('span', { class: 'chip-unit' }, v.unit)),
-        el('div', { class: 'chip-foot' }, `${v.period || '—'} · ${v.result_id}`)))));
+        el('div', { class: 'chip-foot' }, `${v.period || 'n/a'} · ${v.result_id}`)))));
   }
 
   function renderTyped(sid) {
@@ -915,7 +927,7 @@
       const d = env.data;
       const sid = env.session_id;
       const s = session(sid);
-      Object.assign(s, { rows: [], typed: [], typedKeys: new Set(), urls: {}, mode: d.mode, source: d.source, careless: !!d.plant_careless, answer: null, done: null,
+      Object.assign(s, { rows: [], typed: [], typedKeys: new Set(), urls: {}, mode: d.mode, source: d.source, careless: !!d.plant_careless, answer: null, done: null, step: 0,
         m: { leaks: 0, blocked: 0, credits: 0, seconds: null } });
       S.current = sid;
       S.fakeDest = null;
@@ -1118,6 +1130,12 @@
     const h = handlers[env.type];
     if (!h) { console.warn('unknown event type', env.type, env); return; }
     try { h(env, o); } catch (e) { console.error('handler failed', env.type, e); }
+    // The step strip moves on event types the run already emits (run_started resets the step to 0 first).
+    if (env.session_id && window.RunView) {
+      const s = session(env.session_id);
+      const step = window.RunView.stepAfter(env.type, s.step);
+      if (step !== s.step) { s.step = step; renderSteps(env.session_id); }
+    }
   }
 
   // ---------- replay engine ----------
@@ -1165,8 +1183,8 @@
     setProofOpen(false);
     setEmptyRooms();
     fill($('#verdict'), el('p', { class: 'empty' }, 'Not verified yet. Press Verify proof.'));
-    $('#proof-head').textContent = '—';
-    $('#proof-rows').textContent = '—';
+    $('#proof-head').textContent = 'n/a';
+    $('#proof-rows').textContent = 'n/a';
     $('#proof-signer-row').hidden = true;
     $('#sheet').classList.remove('open');
     $('#exit').classList.remove('flash');

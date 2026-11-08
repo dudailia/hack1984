@@ -38,7 +38,7 @@
     <button type="button" id="mode-dt" aria-pressed="true" title="Key 2">Doublethink</button>
   </div>
 
-  <span id="badge" class="badge t-classic">SOURCE: —</span>
+  <span id="badge" class="badge t-classic">SOURCE: n/a</span>
 
   <div class="spacer"></div>
 
@@ -56,12 +56,22 @@
   <button type="button" id="verify" class="secondary" title="Key V">Verify proof</button>
 </header>
 
+<!-- Step strip: the run's current step comes from existing events only (ui/runview.js, app.js renderSteps). -->
+<nav id="steps" class="steps" aria-label="Run steps">
+  <ol>
+    <li data-step="1"><span class="step-n">1</span> <span class="step-label">Drop in the memo</span></li>
+    <li data-step="2"><span class="step-n">2</span> <span class="step-label">Confirm flagged names and figures</span></li>
+    <li data-step="3"><span class="step-n">3</span> <span class="step-label">Ask a research question</span></li>
+    <li data-step="4"><span class="step-n">4</span> <span class="step-label">Cited answer + signed log</span></li>
+  </ol>
+</nav>
+
 <main id="main" class="main dt">
 
   <section id="planner" class="room" aria-labelledby="planner-title">
     <header class="room-head">
       <p class="idx" aria-hidden="true">01 / 03</p>
-      <h2 id="planner-title"><span class="t-classic">Planner room</span><span class="t-console">Private workspace</span></h2>
+      <h2 id="planner-title"><span class="t-classic">Planner room</span><span class="t-console">Local planner</span></h2>
       <p class="sub"><span class="t-classic">never reads the web</span><span class="t-console">Local model · never reads the web</span></p>
     </header>
     <div class="pane-top">
@@ -139,8 +149,8 @@
     <div class="scroll">
       <p id="proof-run" class="run-label"></p>
       <dl class="proof-facts">
-        <div><dt><span class="t-classic">bundle head</span><span class="t-console">Bundle head</span></dt><dd id="proof-head">—</dd></div>
-        <div><dt><span class="t-classic">rows checked</span><span class="t-console">Rows checked</span></dt><dd id="proof-rows">—</dd></div>
+        <div><dt><span class="t-classic">bundle head</span><span class="t-console">Bundle head</span></dt><dd id="proof-head">n/a</dd></div>
+        <div><dt><span class="t-classic">rows checked</span><span class="t-console">Rows checked</span></dt><dd id="proof-rows">n/a</dd></div>
         <div id="proof-signer-row" hidden><dt><span class="t-classic">signer key</span><span class="t-console">Signer key</span></dt><dd id="proof-signer"></dd></div>
       </dl>
       <div id="verdict" class="verdict-slot"></div>
@@ -181,14 +191,14 @@
 <footer class="bottom">
   <button type="button" id="answer-bar" class="answer-bar" disabled title="Key A">
     <span class="label">Answer</span>
-    <span id="answer-text" class="answer-text">—</span>
+    <span id="answer-text" class="answer-text">n/a</span>
     <span class="open">Open</span>
   </button>
   <dl class="metrics">
     <div class="counter" id="m-leaks"><dt>Leaks</dt><dd><span class="num">0</span></dd></div>
     <div class="counter" id="m-blocked"><dt>Blocked</dt><dd><span class="num">0</span></dd></div>
     <div class="counter" id="m-credits"><dt>Credits</dt><dd><span class="num">0</span></dd></div>
-    <div class="counter small" id="m-seconds"><dt>Time</dt><dd><span class="num">—</span></dd></div>
+    <div class="counter small" id="m-seconds"><dt>Time</dt><dd><span class="num">n/a</span></dd></div>
   </dl>
 </footer>
 
@@ -199,6 +209,7 @@
 
 <script src="outbound.js"></script>
 <script src="results.js"></script>
+<script src="runview.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
