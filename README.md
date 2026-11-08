@@ -127,8 +127,12 @@ ANTHROPIC_API_KEY=...
 APP_PORT=8700
 GATE_PORT=8701
 FAKE_TAVILY_PORT=8702
+OLLAMA_PORT=11434
 OLLAMA_MODEL=qwen3:8b
 ```
+
+Both Ollama lines are required: the Planner reads its model only from `.env`, and the loopback guard takes the
+Ollama port from `.env`, so the app and the red team refuse to start without them.
 
 Warning: `app.run` and `fake_tavily` read the shell environment before `.env`; the Gate and the Planner read
 only `.env`. A stray `GATE_PORT` in the shell therefore wins: `app.run` talks to that port while the Gate it
