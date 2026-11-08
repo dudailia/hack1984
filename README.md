@@ -189,6 +189,7 @@ Open the printed address in a browser. The token is required by the page's API c
 | False blocks on the 30 benign questions | `python3 -m checks.benign_run notes/BENIGN.md` (`--json` for the results file) |
 | Usefulness on the 30 benign questions | `python3 -m eval.usefulness --app-url '<the printed UI address>'` (`--dry-run` sends nothing, `--limit 3` for a smoke run) |
 | Tavily credits and seconds per question | `python3 -m eval.cost` |
+| Print every number above with the run it came from | `python3 -m eval.numbers --no-ledger` (reads `shared/results/results.json`: a headline block, then every run; `--ledger ledger/doublethink.db` adds exposure on the machine that ran the batches) |
 
 The verify button in the UI does the same as `proof/verify.py`. The single-agent baseline, the compromised mode
 and every red-team run only ever use the local stand-in for Tavily, never the real service. The red-team runner
@@ -219,7 +220,8 @@ simpler exact-match judge and then rejudged with the frozen checks; the table sh
 The command and commit for each red-team number are in `shared/results/results.json`, every run kept, none deleted.
 The static false-block count is `python3 -m checks.benign_run notes/BENIGN.md` on the frozen checks (tag
 `checks-frozen`, a271959). The live numbers come from one run on real Tavily at commit 294c423 with qwen3:8b
-(`python3 -m eval.usefulness`, then `python3 -m eval.cost`).
+(`python3 -m eval.usefulness`, then `python3 -m eval.cost`). `python3 -m eval.numbers --no-ledger` prints each number
+above with the run and commit it came from; the batch first scored with the fallback judge is marked superseded.
 
 ## What we claim
 

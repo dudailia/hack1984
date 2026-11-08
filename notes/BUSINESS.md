@@ -27,7 +27,7 @@ research (sector growth, trading multiples, comparable deals) while holding a co
   https://www.finra.org/media-center/blog/four-insights-from-finras-2026-industry-snapshot
 - 16,544 investment advisers in 2025, 92.8% of them with 100 or fewer employees (Investment Adviser Association
   snapshot). https://www.investmentadviser.org/iaatoday/press-release/2026-investment-adviser-industry-snapshot-shows-continued-growth-in-demand-for-adviser-services/
-- Of those, firms that advise private equity funds or do M&A advisory: [placeholder, not sourced].
+- Of those, firms that advise private equity funds or do M&A advisory: not measured.
 
 **Why small firms first:** most advisers are small (92.8% at 100 or fewer staff, above), so they buy tools rather
 than build an in-house AI security team. That is a hypothesis about buying behaviour, not a sourced fact.
@@ -153,12 +153,12 @@ ordinary word. We remove the path instead: the model that knows the deal never r
 **Expand later:** legal (privileged documents), pharma (trial data), audit, corporate development. Same pattern:
 a private document plus open-web research.
 
-**First step:** [placeholder: number of design-partner conversations]. We have no customers and no letters of
-intent. Say so.
+**First step:** design-partner conversations with compliance officers (how many so far: not measured). We have no
+customers and no letters of intent. Say so.
 
 ## 7. Pricing hypothesis (a hypothesis, not validated)
 
-> **Hypothesis:** an annual firm licence of [$X], priced near the enterprise tier of egress-security tools, plus
+> **Hypothesis:** an annual firm licence (our price: not measured), near the enterprise tier of egress-security tools, plus
 > pass-through search and model costs. Design partners at a discount for the first year.
 
 What anchors it (sourced):
@@ -172,9 +172,9 @@ What anchors it (sourced):
 
 What we do not know:
 - Tavily credits per research question: 1.77 on average (median 1.5, max 5), from our live benign run at commit 294c423.
-- Claude Reader cost per question: [x].
-- What a CCO at a [placeholder]-person PE adviser actually pays for compliance tooling today: [placeholder].
-- Willingness to pay: [placeholder, ask Misneach and FuzionX at the fair what evidence they want].
+- Claude Reader cost per question: not measured.
+- What a CCO at a PE adviser actually pays for compliance tooling today: not measured.
+- Willingness to pay: not measured.
 
 ## 8. Competitors (from their own pages, checked Nov 7, 2026)
 
@@ -228,7 +228,7 @@ Unconfirmed: the other judges and which people judge each prize.
 
 1. **"Who has said they would pay for this?"**
    Nobody yet. We have no customers and no letters of intent. The budget comes from a legal requirement that already
-   exists (204A, 15(g)) and from fines of $1M to $18M for policy failures. Next step: [placeholder] design-partner
+   exists (204A, 15(g)) and from fines of $1M to $18M for policy failures. Next step: design-partner
    conversations with compliance officers.
 
 2. **"Why wouldn't a firm just ban AI agents?"**
@@ -265,7 +265,7 @@ Unconfirmed: the other judges and which people judge each prize.
 
 9. **"How big is the market?"**
    3,184 FINRA member firms and 16,544 investment advisers (2025 counts). The share that does M&A or advises PE funds
-   is [placeholder]. Expansion is any team with a private document and open-web research: legal, pharma, audit.
+   is not measured. Expansion is any team with a private document and open-web research: legal, pharma, audit.
 
 10. **"Why this team, and what stops a big vendor from copying it?"**
     [Each member: one true, checkable line.] Honest answer on defensibility: the idea is published, so the moat is

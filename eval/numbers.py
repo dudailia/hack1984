@@ -1,8 +1,14 @@
 """Every number DEVPOST.md and PITCH_SCRIPT.md need, read from the results files, each with its file and field.
 
-    python3 -m eval.numbers --results shared/results --ledger ledger/doublethink.db
+    python3 -m eval.numbers --no-ledger                    # shared/results/results.json, no exposure
+    python3 -m eval.numbers --ledger ledger/doublethink.db # plus exposure, on the machine that ran the batches
     python3 -m eval.numbers --results shared/results/results.json other/results_b2.json --ledger PATH
-    python3 -m eval.numbers --results shared/results --no-ledger      # headline numbers only
+
+First a HEADLINE block: the numbers to quote, each from the latest run that may supply it.
+- Leaks per mode: the latest run that has the mode, was not scored with the fallback judge (its judge text says
+  FALLBACK) and records detector.matches_checks_frozen = true. Same rule as the results screen (ui/results.js).
+- False blocks (static) and usefulness: the latest run that records them.
+Then the detail for every run. A fallback-judge run is labelled "superseded: fallback judge, do not quote".
 
 Run it on the machine that ran the batches: --ledger must be the ledger those runs were written to, because the
 per-attack session ids are looked up there. A directory in --results gives its results*.json, sorted. A results
@@ -36,6 +42,7 @@ from eval import loopback
 
 REPO = loopback.REPO
 RESULTS_PATTERN = "results*.json"
+DEFAULT_RESULTS = os.path.join(REPO, "shared", "results", "results.json")
 MISSING = "MISSING"
 
 # DEVPOST table rows and PITCH_SCRIPT 2:05, in order.
@@ -234,10 +241,64 @@ def _fraction(obj, num_key, den_key, where):
     return "%s / %s" % (n, d), "%s.%s / %s.%s" % (where, num_key, where, den_key)
 
 
+def is_fallback(run):
+    judge = run.get("leak_judge") if run.get("leak_judge") is not None else run.get("judge")
+    return "fallback" in str(judge or "").lower()
+
+
+def is_frozen(run):
+    det = run.get("detector")
+    return isinstance(det, dict) and det.get("matches_checks_frozen") is True
+
+
+def _has_mode(run, key):
+    m = run.get("modes") if isinstance(run.get("modes"), dict) else {}
+    m = m.get(key)
+    return isinstance(m, dict) and _num(m.get("runs")) and m["runs"] > 0
+
+
+def run_tag(run):
+    """Why a run is or is not quotable, shown on its detail header."""
+    if is_fallback(run):
+        return "superseded: fallback judge, do not quote"
+    if isinstance(run.get("modes"), dict) and run["modes"] and not is_frozen(run):
+        return "not scored by the frozen detector, not in the headline"
+    return ""
+
+
+def headline_lines(doc):
+    runs = [(i, r) for i, r in enumerate(doc.get("runs") or []) if isinstance(r, dict)]
+
+    def latest(ok):
+        for i, r in reversed(runs):
+            if ok(r):
+                return i, r
+        return None
+
+    def line(label, hit, obj_of, num_key, den_key):
+        if hit is None:
+            return _line(label, MISSING, "no run records it")
+        i, r = hit
+        value, _ = _fraction(obj_of(r), num_key, den_key, "runs[%d]" % i)
+        return _line(label, value, "runs[%d] %r commit %s" % (i, r.get("label"), r.get("commit")))
+
+    lines = ["  HEADLINE (leaks only from runs scored by the frozen detector; never a fallback-judge run)"]
+    for key, label in SETUPS:
+        hit = latest(lambda r, k=key: _has_mode(r, k) and not is_fallback(r) and is_frozen(r))
+        lines.append(line(label, hit, lambda r, k=key: r["modes"][k], "leaked", "runs"))
+    lines.append(line("False blocks (static)", latest(lambda r: isinstance(r.get("false_blocks"), dict)),
+                      lambda r: r["false_blocks"], "blocked", "total"))
+    lines.append(line("Usefulness", latest(lambda r: isinstance(r.get("usefulness"), dict)),
+                      lambda r: r["usefulness"], "answered_with_cited_number", "total"))
+    return lines
+
+
 def run_lines(i, run, doc, ledger, poison):
     w = "runs[%d]" % i
-    lines = ["  -- %s  label %r  commit %s  planner %s  source %s" % (
-        w, run.get("label"), run.get("commit"), run.get("planner_model"), run.get("source"))]
+    tag = run_tag(run)
+    lines = ["  -- %s  label %r  commit %s  planner %s  source %s%s" % (
+        w, run.get("label"), run.get("commit"), run.get("planner_model"), run.get("source"),
+        ("  [%s]" % tag) if tag else "")]
     if run.get("command"):
         lines.append("     command: %s" % run["command"])
 
@@ -318,6 +379,8 @@ def file_lines(path, ledger, poison):
         lines.append("  EXAMPLE DATA - not measured (example is %r); never quote these" % doc.get("example"))
     if not doc["runs"]:
         lines.append("  MISSING: no runs")
+    else:
+        lines += headline_lines(doc)
     for i, run in enumerate(doc["runs"]):
         lines += run_lines(i, run if isinstance(run, dict) else {}, doc, ledger, poison)
     return lines
@@ -370,8 +433,9 @@ def report(paths, ledger_path, poison):
 def main(argv=None):
     loopback.install_audit_hook()  # invariant 1: this process never needs the network
     ap = argparse.ArgumentParser(prog="python3 -m eval.numbers", description=__doc__.splitlines()[0])
-    ap.add_argument("--results", nargs="+", required=True, metavar="PATH",
-                    help="results files, or directories holding %s (taken sorted)" % RESULTS_PATTERN)
+    ap.add_argument("--results", nargs="+", default=[DEFAULT_RESULTS], metavar="PATH",
+                    help="results files, or directories holding %s (taken sorted); default "
+                         "shared/results/results.json" % RESULTS_PATTERN)
     led = ap.add_mutually_exclusive_group(required=True)
     led.add_argument("--ledger", metavar="DB", help="the Gate ledger the runs were written to (ledger/doublethink.db "
                                                     "on the machine that ran them); opened read only")
