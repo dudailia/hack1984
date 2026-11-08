@@ -15,7 +15,8 @@ An AI research agent for confidential deals: the model that holds your secret ne
 - Privacy-First (main track)
 - Most Startup-able (Misneach, FuzionX)
 - Surge (Tavily)
-[confirm with organizers that one project can enter all three]
+
+Privacy-First, Most Startup-able, Surge (deck: one project may enter Privacy-First plus any side track it qualifies for)
 
 ---
 
@@ -41,7 +42,14 @@ Doublethink splits the agent into two minds and puts one gate between them and t
 
 A poisoned page can only reach the Reader, and the Reader has nothing to steal.
 
-**The demo:** the same poisoned page is shown to a normal single agent and to Doublethink. The single agent puts "Project Halyard, Ossory Capital Partners, $412 million" into its next search. Doublethink leaks nothing and still returns a cited answer. [If the "Try to break it" panel ships: a judge can type their own hidden instruction and run it against both.] All companies, people and deals in the demo are fictional.
+**The demo:** the same poisoned page is shown to a normal single agent and to Doublethink. The single agent puts "Project Halyard, Ossory Capital Partners, $412 million" into its next search. Doublethink leaks nothing and still returns a cited answer. All companies, people and deals in the demo are fictional.
+
+## What leaves the device
+- **What leaves.** Search queries to Tavily, each checked by the Gate before it is sent, plus extract requests for pages Tavily has already returned. Public page text to Anthropic, for the Reader to extract facts from, with the query that was already sent to Tavily and the list of fact types to extract. Nothing else: the Gate allows exact hosts and paths only.
+- **Who can read it.** Tavily can read the queries. Anthropic can read the public page text, that already-public query and the Reader's fixed instructions. The Planner runs locally on Ollama, so the memo is never sent to a model provider.
+- **What never leaves.** The memo, the confirmed names, the price and the codename. The Planner holds them and never reads the web; the Reader never sees them; the Gate blocks any outbound request that contains them, in the listed encodings, or the canary.
+- **How to prove it.** Every outbound request, blocked ones included, is in a hash-chained ledger written before sending. Each session exports as an Ed25519-signed bundle that a standalone verifier checks offline, without our code. Signer key fingerprint: [fingerprint].
+- **Would anyone use it.** [usefulness: x / 30 ordinary analyst questions answered with at least one validated, cited number]. We have no customers yet.
 
 ## How we built it
 - Python standard library only, plus `cryptography` for Ed25519. No agent framework.
@@ -98,6 +106,9 @@ The person who built the Gate checks did not see the file until the checks were 
 - The signed record proves what this install logged, not what code ran.
 - We know of no reported case of deal information leaking through an AI tool. The risk rests on the rules and on published prompt-injection incidents.
 
+## Q&A notes
+- **Does a query still reveal something?** Yes. A query that names the target reveals interest in that target, even with the buyer, price and codename removed. The user decides which terms are public before the run starts. The demo asks only sector and peer questions, so no query names the target.
+
 ## Prior art (credited)
 - Simon Willison, The Dual LLM pattern (April 2023), https://simonwillison.net/2023/Apr/25/dual-llm-pattern/ , and The lethal trifecta for AI agents (June 2025), https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/
 - Debenedetti et al., Google DeepMind, Defeating Prompt Injections by Design (CaMeL, March 2025), https://arxiv.org/abs/2503.18813
@@ -112,6 +123,12 @@ python, ollama, qwen3, claude, anthropic-api, tavily, ed25519, sqlite, javascrip
 - **Aayush Rai:** Gate, Planner, run loop, loopback guard. [one line]
 - **Anant Kumar:** Gate checks, signed bundle and offline verifier, false-block measurement. [one line]
 - **Sheara Pappaterra:** UI, motion and demo. [one line]
+
+## Why this team
+- **Ilia:** [placeholder]
+- **Aayush:** [placeholder]
+- **Anant:** [placeholder]
+- **Sheara:** [placeholder]
 
 ## Links
 - Code: [public repo link, or "private, available on request"]
