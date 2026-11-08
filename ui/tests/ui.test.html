@@ -5,6 +5,7 @@
 <title>Doublethink UI browser tests</title>
 <link rel="icon" href="data:,">
 <script src="../outbound.js"></script>
+<script src="../results.js"></script>
 </head>
 <body>
 <!-- Run by ui/tests/test_ui_browser.py through headless Edge and ui/preview.py. Results land in #result. -->
@@ -150,6 +151,39 @@
     {
       const doc = await load('at=106500&theme=console');
       ok('panel: follows the verified run in the proof beat', doc.getElementById('ob-summary').textContent === O.summaryText(O.summarize(sessions.s_dtreal1)), doc.getElementById('ob-summary').textContent);
+    }
+    // ---------- results screen: runs chosen by the data, never by position (Ilia's check) ----------
+    {
+      const R = window.Results;
+      const three = await (await fetch('fixtures/results_three_runs.json', { cache: 'no-store' })).json();
+      const sel = R.select(three);
+      const from = Object.fromEntries(sel.modes.map((m) => [m.key, m.index]));
+      ok('three runs: single_agent from the rejudged-frozen run', from.single_agent === 1 && three.runs[1].label === 'checks-frozen rejudged-frozen', JSON.stringify(from));
+      ok('three runs: compromised from the rejudged-frozen run', from.compromised === 1, JSON.stringify(from));
+      ok('three runs: two_minds and doublethink from the batch 2 run', from.two_minds === 2 && from.doublethink === 2, JSON.stringify(from));
+      ok('three runs: the fallback run is excluded', sel.excluded.length === 1 && sel.excluded[0].index === 0 && /fallback/.test(sel.excluded[0].reason), JSON.stringify(sel.excluded));
+      ok('three runs: extras never come from the fallback run', [sel.falseBlocks, sel.usefulness, sel.secondsPerQuestion, sel.creditsPerQuestion].every((x) => x === null), 'an extra came from run 0');
+
+      const box = document.createElement('section');
+      R.render(box, three, { example: false, source: '/shared/results/results.json' });
+      const text = box.textContent;
+      const values = Object.fromEntries([...box.querySelectorAll('.bv')].map((n) => [n.dataset.mode, n.textContent.trim()]));
+      ok('three runs: bar values from the right runs', values.single_agent === '2 / 40' && values.compromised === '40 / 40' && values.two_minds === '0 / 40' && values.doublethink === '0 / 40', JSON.stringify(values));
+      const fallbackNumbers = ['1 / 40', '39 / 40', '13 / 30', '17 / 30', '5.32', '9.75'].filter((n) => text.includes(n));
+      ok('three runs: none of the fallback run\'s numbers appear', fallbackNumbers.length === 0, fallbackNumbers.join(', '));
+      const src = [...box.querySelectorAll('.run-sources li[data-run]')].map((li) => li.textContent);
+      ok('three runs: each number names its run under the bars',
+        src.length === 2 && has(src[0], 'single agent, compromised agent') && has(src[0], 'run 2 of 3') && has(src[0], '“checks-frozen rejudged-frozen”')
+        && has(src[1], 'two minds, two minds + gate') && has(src[1], 'run 3 of 3') && has(src[1], 'commit c303c1c'), JSON.stringify(src));
+      ok('three runs: the excluded run is named as left out, without numbers', has(text, 'Not shown: run 1 of 3 (scored with the fallback judge)'), text.slice(-300));
+      ok('three runs: no example label on measured data', !box.querySelector('.example-tag, .example-banner'), 'example label found');
+
+      // A run without the frozen detector flag, and a judge field named leak_judge, are handled the same way.
+      const variant = JSON.parse(JSON.stringify(three));
+      variant.runs[1].leak_judge = 'FALLBACK exact substring';
+      delete variant.runs[2].detector;
+      const v = R.select(variant);
+      ok('leak_judge FALLBACK and a missing detector both exclude a run', v.modes.every((m) => m.index === null) && v.excluded.length === 3, JSON.stringify(v.modes.map((m) => m.index)));
     }
     // ---------- results screen: never example data unless ?example=1 (Ilia's must-fix) ----------
     {

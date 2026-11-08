@@ -561,9 +561,24 @@ All motion uses `--ease`. Durations at or under 250ms, except the sequences abov
   - `label`, `commit`, `planner_model`, `source`
   - `answered with a cited number {usefulness.answered_with_cited_number} / {usefulness.total}`
   - `cost.tavily_credits_per_question` and `cost.seconds_per_question`, shown as `not measured` when null.
-- Run shown: the last entry in `runs`, which is the latest. `runs[0]` is the frozen run (FORMATS §9: "the frozen run
-  first"). If there is more than one run, a thin --text tick marks the `runs[0]` value on each bar, with the caption
-  `| = {runs[0].label} run`.
+- **Which run each number comes from is decided by the data, never by position** (`ui/results.js`, Ilia's check
+  on PR #39). `runs` keeps every run in time order and never deletes one, and runs differ in how they were judged:
+  1. A run whose `leak_judge` (or, as in the real file, `judge`) text says FALLBACK is **never shown**.
+  2. A run counts as scored by the frozen detector only if `detector.matches_checks_frozen` is true.
+  3. For each mode, the screen uses the **most recent** run that passes 1 and 2 and has that mode. False blocks,
+     usefulness and cost are chosen the same way. With none, the screen says "not measured".
+  4. Under the bars, "Where each number comes from" names each source run: `run N of M`, its label and its commit.
+     The label alone is not unique: the real file has two runs labelled "checks-frozen". Excluded runs are listed as
+     "Not shown: run N of M (scored with the fallback judge)", with no numbers.
+
+  With the real file (PR #38: three runs), single agent and compromised come from run 2 ("checks-frozen
+  rejudged-frozen"), and two minds and two minds + gate from run 3 (batch 2, commit c303c1c). Run 1 (fallback judge,
+  single agent 1/40) is never shown. The old tick marks for `runs[0]` are gone, because they showed the fallback run.
+  - With `?example=1` the example file has no judge or detector fields. Its runs are accepted unless they say
+    FALLBACK, and every number carries the example label.
+  - Test: `ui/tests/fixtures/results_three_runs.json` is shaped like the real file. Its fallback run carries
+    distinctive numbers, and the harness checks that none of them appear, that each mode comes from the right run,
+    and that a FALLBACK `leak_judge` or a missing detector flag also excludes a run.
 - No bar animation. The numbers are the point.
 
 ## 8. Interaction and accessibility

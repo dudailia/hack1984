@@ -713,3 +713,9 @@ mark.planted {
   body::before, body::after { display: none; }
   .packet { display: none; }
 }
+
+/* Results: which run each number comes from (ui/results.js). */
+.run-sources-title { margin-top: var(--sp-4); }
+.run-sources { margin: var(--sp-1) 0 0; padding-left: 1.2em; color: var(--text-muted); }
+.run-sources li { margin: 2px 0; }
+.run-from { color: var(--text-muted); }

@@ -669,3 +669,10 @@ mark.planted {
   *, *::before, *::after { animation: none !important; transition: none !important; }
   .packet { display: none; }
 }
+
+/* Results: which run each number comes from (ui/results.js). */
+.run-sources-title { margin-top: var(--s4); }
+.run-sources { margin: 4px 0 0; padding-left: 1.2em; color: var(--text-2); max-width: 72rem; }
+.run-sources li { margin: 2px 0; }
+.run-sources .run-excluded { color: var(--muted); }
+.run-from { color: var(--muted); }

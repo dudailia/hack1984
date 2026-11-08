@@ -832,7 +832,6 @@
   // Results (FORMATS §9). Measured numbers come only from /shared/results/results.json. There is no silent fallback:
   // example data is loaded only when the URL says ?example=1, and then every number is labelled as example data.
   const EXAMPLE_MODE = params.get('example') === '1';
-  const EXAMPLE_LABEL = 'EXAMPLE DATA, not measured';
   let resultsState = 'loading';   // 'measured' | 'example' | 'missing' | 'not-measured' | 'error'
   let resultsError = '';
 
@@ -866,12 +865,6 @@
     }
   }
 
-  // A number on the results screen. In example mode it always carries the large example label.
-  function num(text, cls) {
-    return el('span', { class: `num-val${cls ? ` ${cls}` : ''}`, 'data-num': '' }, text,
-      resultsState === 'example' ? el('span', { class: 'example-tag' }, EXAMPLE_LABEL) : null);
-  }
-
   function renderNoResults(box) {
     const why = {
       loading: 'The results file is still loading.',
@@ -894,57 +887,8 @@
       renderNoResults(box);
       return;
     }
-    const runs = results.runs;
-    const run = runs[runs.length - 1];
-    const frozen = runs.length > 1 ? runs[0] : null;
-    const bars = [
-      ['single agent', 'single_agent'],
-      ['compromised agent', 'compromised'],
-      ['two minds', 'two_minds'],
-      ['two minds + gate', 'doublethink'],
-    ];
-    const grid = el('div', { class: 'bars' });
-    for (const [label, key] of bars) {
-      const m = (run.modes || {})[key];
-      const track = el('div', { class: 'track', 'aria-hidden': 'true' });
-      if (m && m.runs) {
-        const f = el('div', { class: 'fill' });
-        f.style.width = `${(100 * m.leaked) / m.runs}%`;
-        track.append(f);
-        const fr = frozen && (frozen.modes || {})[key];
-        if (fr && fr.runs) {
-          const tick = el('div', { class: 'tick' });
-          tick.style.left = `${(100 * fr.leaked) / fr.runs}%`;
-          track.append(tick);
-        }
-      }
-      grid.append(el('div', { class: 'bl' }, label), track,
-        el('div', { class: 'bv' }, m ? num(`${m.leaked} / ${m.runs}`) : 'not run'));
-    }
-    const fb = run.false_blocks;
-    const byRule = fb && fb.by_rule ? Object.entries(fb.by_rule).map(([k, v]) => `${k} ${v}`).join(', ') : '';
-    const u = run.usefulness;
-    const c = run.cost || {};
-    const nm = (v) => (v == null ? 'not measured' : String(v));
-    const isExample = resultsState === 'example';
-    box.classList.toggle('is-example', isExample);
-    fill(box, [
-      isExample ? el('div', { class: 'example-banner', role: 'note' }, EXAMPLE_LABEL,
-        el('span', { class: 'example-banner-sub' }, `Loaded because the URL has ?example=1, from ${resultsSource}.`)) : null,
-      el('h2', { id: 'results-title', class: 'results-title' },
-        num(String(results.attacks_total), 'big'), ' attacks, written and hashed before the code.'),
-      el('p', { class: 'sha' }, `attack file sha256 ${shortHash(results.attack_file_sha256)}`),
-      el('p', { class: 'smallprint', style: 'margin:0 0 0.75rem' }, 'Leaks per setup'),
-      grid,
-      frozen ? el('p', { class: 'smallprint' }, `| = ${frozen.label} run`) : null,
-      fb ? el('p', { class: 'fb' }, 'False blocks on normal questions: ',
-        num(`${fb.blocked} / ${fb.total}`, fb.blocked > 0 ? 'bad' : ''),
-        byRule ? el('span', { class: 'smallprint' }, `  ${byRule}`) : null) : null,
-      el('p', { class: 'smallprint' }, `run ${run.label} · commit ${run.commit} · planner ${run.planner_model} · source ${run.source}`),
-      u ? el('p', { class: 'smallprint' }, 'answered with a cited number ', num(`${u.answered_with_cited_number} / ${u.total}`)) : null,
-      el('p', { class: 'smallprint' }, 'Tavily credits per question ', num(nm(c.tavily_credits_per_question)),
-        ' · seconds per question ', num(nm(c.seconds_per_question))),
-      el('p', { class: 'smallprint' }, `from ${resultsSource}`)]);
+    // Which run feeds which number is decided by the data (ui/results.js), never by position in runs[].
+    window.Results.render(box, results, { example: resultsState === 'example', source: resultsSource });
   }
 
   function setScreen(screen) {
