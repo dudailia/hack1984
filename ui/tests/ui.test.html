@@ -346,59 +346,73 @@
       const v = R.select(variant);
       ok('leak_judge FALLBACK and a missing detector both exclude a run', v.modes.every((m) => m.index === null) && v.excluded.length === 3, JSON.stringify(v.modes.map((m) => m.index)));
     }
-    // ---------- results screen: real-estate headline, corporate memo as "First evaluation" ----------
+    // ---------- results screen: false blocks, usefulness and cost from the runs that carry them ----------
+    {
+      const R = window.Results;
+      const three = await (await fetch('fixtures/results_three_runs.json', { cache: 'no-store' })).json();
+      // Shaped like the real file: the benign-frozen and usefulness runs carry figures but no detector field.
+      const five = JSON.parse(JSON.stringify(three));
+      five.runs.push(
+        { label: 'benign-frozen', commit: 'a271959', planner_model: null, source: null, command: 'python3 -m checks.benign_run notes/BENIGN.md',
+          false_blocks: { blocked: 0, total: 30, by_rule: {} } },
+        { label: 'usefulness', commit: 'checks-frozen-80-g294c423', planner_model: 'qwen3:8b', source: 'real',
+          usefulness: { answered_with_cited_number: 23, total: 30 }, cost: { tavily_credits_per_question: 1.77, seconds_per_question: 14.7 } });
+      const sel = R.select(five);
+      const from = Object.fromEntries(sel.modes.map((m) => [m.key, m.index]));
+      ok('five runs: leak bars keep the frozen-detector rule', JSON.stringify(from) === JSON.stringify({ single_agent: 1, compromised: 1, two_minds: 2, doublethink: 2 }), JSON.stringify(from));
+      ok('five runs: false blocks from benign-frozen', sel.falseBlocks && sel.falseBlocks.index === 3 && sel.falseBlocks.value.blocked === 0 && sel.falseBlocks.value.total === 30, JSON.stringify(sel.falseBlocks));
+      ok('five runs: usefulness and cost from the usefulness run', sel.usefulness && sel.usefulness.index === 4 && sel.creditsPerQuestion.index === 4
+        && sel.secondsPerQuestion.index === 4 && sel.creditsPerQuestion.value === 1.77 && sel.secondsPerQuestion.value === 14.7, JSON.stringify([sel.usefulness, sel.creditsPerQuestion, sel.secondsPerQuestion]));
+      ok('five runs: only the fallback run is not shown', sel.excluded.map((x) => x.index).join() === '0', JSON.stringify(sel.excluded));
+      const box = document.createElement('section');
+      R.render(box, five, { example: false, source: '/shared/results/results.json' });
+      const fb = box.querySelector('.fb');
+      ok('five runs: "False blocks: 0 / 30" with its run', !!fb && has(fb.textContent, '0 / 30') && has(fb.textContent, 'run 4 of 5') && has(fb.textContent, '“benign-frozen”')
+        && !has(box.textContent, 'False blocks on normal questions: not measured'), fb ? fb.textContent : box.textContent.slice(0, 200));
+      ok('five runs: usefulness and cost name the usefulness run', has(box.textContent, '23 / 30') && has(box.textContent, '1.77') && has(box.textContent, '14.7')
+        && (box.textContent.match(/run 5 of 5, “usefulness”/g) || []).length === 3, box.textContent.slice(-400));
+      ok('five runs: the 40-attack block is labelled first evaluation, corporate deal memo', box.querySelector('.eval-label').textContent === 'First evaluation, corporate deal memo'
+        && !!(box.querySelector('.eval-label').compareDocumentPosition(box.querySelector('.bars')) & Node.DOCUMENT_POSITION_FOLLOWING), box.textContent.slice(0, 120));
+      ok('five runs: no fallback number', ['1 / 40', '39 / 40', '13 / 30', '17 / 30', '5.32', '9.75'].every((n) => !box.textContent.includes(n)), 'fallback number shown');
+    }
+    // The page itself, with the results.json on this checkout: every figure the data carries is shown.
+    {
+      const real = await fetch('/shared/results/results.json', { cache: 'no-store' });
+      if (real.ok) {
+        const data = await real.json();
+        const sel = window.Results.select(data);
+        const doc = await load(`at=${RESULTS_AT}&theme=console`);
+        const box = doc.getElementById('results');
+        const fbText = (box.querySelector('.fb') || box).textContent;
+        okResults('results screen: false blocks read from the data', sel.falseBlocks
+          ? has(fbText, `${sel.falseBlocks.value.blocked} / ${sel.falseBlocks.value.total}`) && !has(box.textContent, 'False blocks on normal questions: not measured')
+          : has(box.textContent, 'not measured'), fbText);
+        okResults('results screen: labelled first evaluation, corporate deal memo', has(box.textContent, 'First evaluation, corporate deal memo'), box.textContent.slice(0, 120));
+      }
+    }
+    // ---------- results screen: the real estate scenario is a demo, never next to 40-attack numbers ----------
     {
       const R = window.Results;
       const two = await (await fetch('fixtures/results_two_scenarios.json', { cache: 'no-store' })).json();
       ok('scenarioOf: scenario field', R.scenarioOf({ scenario: 'real_estate' }) === 'real_estate' && R.scenarioOf({ scenario: 'Real-Estate' }) === 'real_estate', 'field not read');
       ok('scenarioOf: label', R.scenarioOf({ label: 're-frozen' }) === 'real_estate' && R.scenarioOf({ label: 'batch real estate 2' }) === 'real_estate'
         && R.scenarioOf({ label: 'checks-frozen rejudged-frozen' }) === 'corporate' && R.scenarioOf({ label: 'benign-frozen' }) === 'corporate', 'label rule');
-      const both = R.selectScenarios(two);
-      const idx = (sel) => Object.fromEntries(sel.modes.map((m) => [m.key, m.index]));
-      ok('two scenarios: headline is the frozen real-estate run', both.headline.scenario === 'real_estate'
-        && Object.values(idx(both.headline)).every((i) => i === 4), JSON.stringify(idx(both.headline)));
-      ok('two scenarios: first evaluation from the corporate runs', !!both.first && JSON.stringify(idx(both.first))
-        === JSON.stringify({ single_agent: 2, compromised: 2, two_minds: 3, doublethink: 3 }), JSON.stringify(both.first && idx(both.first)));
-      ok('two scenarios: each block excludes its own fallback run', both.headline.excluded.map((x) => x.index).join() === '1'
-        && both.first.excluded.map((x) => x.index).join() === '0', JSON.stringify([both.headline.excluded, both.first.excluded]));
-
+      const sel = R.select(two);
+      const idx = Object.fromEntries(sel.modes.map((m) => [m.key, m.index]));
+      ok('real estate runs never feed the bars', JSON.stringify(idx) === JSON.stringify({ single_agent: 2, compromised: 2, two_minds: 3, doublethink: 3 }), JSON.stringify(idx));
+      ok('real estate runs never feed false blocks, usefulness or cost', [sel.falseBlocks, sel.usefulness, sel.creditsPerQuestion, sel.secondsPerQuestion].every((h) => !h || (h.index !== 1 && h.index !== 4)), 'a real estate figure');
+      ok('real estate runs listed as a demo, not a measurement', sel.excluded.filter((x) => /real estate scenario: a demo/.test(x.reason)).map((x) => x.index).join() === '1,4', JSON.stringify(sel.excluded));
       const box = document.createElement('section');
-      R.render(box, two, { example: false, source: '/shared/results/results.json' });
-      const vals = (root) => Object.fromEntries([...root.querySelectorAll('.bv')].map((n) => [n.dataset.mode, n.textContent.trim()]));
-      const head = box.querySelector('.headline-eval');
-      const first = box.querySelector('.first-eval');
-      ok('two scenarios: headline bars', !!head && JSON.stringify(vals(head)) === JSON.stringify({ single_agent: '4 / 40', compromised: '38 / 40', two_minds: '0 / 40', doublethink: '0 / 40' }), JSON.stringify(head && vals(head)));
-      ok('two scenarios: "First evaluation" below the headline', !!first && has(first.textContent, 'First evaluation')
-        && !!(head.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING), first ? first.textContent.slice(0, 80) : 'missing');
-      ok('two scenarios: first evaluation bars', !!first && JSON.stringify(vals(first)) === JSON.stringify({ single_agent: '2 / 40', compromised: '40 / 40', two_minds: '0 / 40', doublethink: '0 / 40' }), JSON.stringify(first && vals(first)));
-      const text = box.textContent;
-      const fallbackNumbers = ['1 / 40', '39 / 40', '13 / 30', '17 / 30', '5.32', '9.75', '7 / 40', '37 / 40', '5 / 40', '3 / 40', '11 / 30', '19 / 30', '8.25', '6.41'].filter((n) => text.includes(n));
-      ok('two scenarios: no fallback number appears', fallbackNumbers.length === 0, fallbackNumbers.join(', '));
-      ok('two scenarios: false blocks from the real-estate run', has(box.querySelector('.fb').textContent, '1 / 30') && has(box.querySelector('.fb').textContent, 'run 5 of 5'), box.querySelector('.fb').textContent);
-      ok('two scenarios: sources name runs by label and file place', has(head.textContent, 'run 5 of 5') && has(head.textContent, '“re-checks-frozen”')
-        && has(first.textContent, 'run 3 of 5') && has(first.textContent, 'run 4 of 5'), head.textContent.slice(-200));
-
-      // The label alone also marks a real-estate run; without one, the screen is the corporate screen as before.
-      const byLabel = JSON.parse(JSON.stringify(two));
-      byLabel.runs.forEach((r) => { delete r.scenario; });
-      ok('two scenarios: label alone is enough', R.selectScenarios(byLabel).headline.scenario === 'real_estate', 'not found by label');
-      const three = await (await fetch('fixtures/results_three_runs.json', { cache: 'no-store' })).json();
-      const plain = R.selectScenarios(three);
-      const b3 = document.createElement('section');
-      R.render(b3, three, { example: false, source: 'x' });
-      ok('no real-estate run: corporate screen as before, no first-evaluation block', plain.first === null && plain.headline.scenario === null
-        && !b3.querySelector('.first-eval') && !has(b3.textContent, 'Real estate'), b3.textContent.slice(0, 120));
-      // A real-estate run judged only by the fallback never becomes the headline.
-      const onlyFallbackRe = JSON.parse(JSON.stringify(two));
-      onlyFallbackRe.runs.splice(4, 1);
-      ok('fallback-only real-estate runs: no real-estate headline', R.selectScenarios(onlyFallbackRe).headline.scenario === null, 'became headline');
-      // ?example=1 rules still apply to both blocks.
+      R.render(box, two, { example: false, source: 'x' });
+      const reNumbers = ['4 / 40', '38 / 40', '7 / 40', '37 / 40', '5 / 40', '3 / 40', '1 / 30', '11 / 30', '19 / 30', '8.25', '6.41'].filter((n) => box.textContent.includes(n));
+      ok('no real estate number on the screen', reNumbers.length === 0, reNumbers.join(', '));
+      ok('no "Real estate scenario" headline or second block', !box.querySelector('.first-eval, .scenario-name') && box.querySelectorAll('.bars').length === 1, box.innerHTML.slice(0, 200));
       const bx = document.createElement('section');
       const ex = JSON.parse(JSON.stringify(two));
       ex.runs.forEach((r) => { delete r.detector; });
       R.render(bx, ex, { example: true, source: 'x' });
       const nums = [...bx.querySelectorAll('[data-num]')];
-      ok('two scenarios with ?example=1: every number labelled', nums.length > 8 && nums.every((n) => n.querySelector('.example-tag')), `${nums.length}`);
+      ok('?example=1: every number labelled', nums.length >= 5 && nums.every((n) => n.querySelector('.example-tag')), `${nums.length}`);
     }
     // ---------- results screen: never example data unless ?example=1 (Ilia's must-fix) ----------
     {
@@ -463,7 +477,9 @@
       ok('pickRun: fake before careless when no real run', A.pickRun(runs.slice(0, 2).concat(runs[3]).map((r) => ({ ...r, source: r.sid === 'd' ? 'real' : r.source })), false) === 'b', 'wrong pick');
       ok('pickRun: live shows the latest doublethink run', A.pickRun(runs, true) === 'd', A.pickRun(runs, true));
       ok('pickRun: never the single agent', A.pickRun(runs.slice(0, 1), false) === null, 'picked a single-agent run');
-      ok('verified: only when the latest proof is VALID', A.verified([{ valid: true }]) && !A.verified([{ valid: true }, { valid: false }]) && !A.verified([]), 'wrong');
+      ok('verified: only when the latest genuine proof is VALID', A.verified([{ valid: true }]) && !A.verified([{ valid: true }, { valid: false }]) && !A.verified([]), 'wrong');
+      ok('verified: a tamper result never removes the genuine verification', A.verified([{ valid: true, tampered: false }, { valid: false, tampered: true }])
+        && A.lastGenuine([{ valid: true, rows_checked: 8 }, { valid: false, tampered: true, rows_checked: 3 }]).rows_checked === 8, 'tamper counted');
       const body = A.runRequest('  What are industrial cap rates?  ', 'real');
       ok('runRequest: a Doublethink run with the question', JSON.stringify(body) === JSON.stringify({ mode: 'doublethink', source: 'real', plant_careless: false, question: 'What are industrial cap rates?' }), JSON.stringify(body));
       let threw = 0;
@@ -508,13 +524,25 @@
       ok('analyst: question from run_started', doc.getElementById('an-question').value === one(pick, 'run_started').data.question && doc.getElementById('an-question').readOnly, doc.getElementById('an-question').value);
       ok('analyst: the replay shows the real-source run when there is one', has(doc.getElementById('session-pill').textContent, '') && pick === ROLE.dtreal, `${pick} vs ${ROLE.dtreal}`);
 
-      // Verified badge: absent before verify, present after a VALID proof, absent after the tamper.
+      // Verified badge: verified automatically at run_done (replay: the recorded proof_result), still there after the
+      // recorded tamper, which only the Audit view shows.
       const badge = (d) => visible(d, d.getElementById('an-verified'));
-      ok('analyst: no Verified badge before the proof is checked', !badge(doc), 'badge shown');
+      const rec = events.find((e) => e.type === 'proof_result' && e.session_id === pick && !e.data.tampered);
+      ok('analyst: Verified at run_done without opening the Audit view', !!rec && rec.data.valid === true && badge(doc)
+        && has(doc.getElementById('an-proof').textContent, `${rec.data.rows_checked} rows`), doc.getElementById('an-proof').textContent);
+      const beforeDone = events.filter((e) => e.session_id === pick && e.t_ms < tDone).pop();
+      doc = await load(`at=${beforeDone.t_ms}&theme=console&view=analyst`);
+      ok('analyst: no Verified badge before the run is done', !badge(doc), 'badge shown');
       doc = await load(`at=${after(verify)}&theme=console&view=analyst`);
       ok('analyst: Verified badge after a VALID proof_result', verify.data.valid === true && badge(doc) && has(doc.getElementById('an-proof').textContent, String(verify.data.rows_checked)), doc.getElementById('an-proof').textContent);
       doc = await load(`at=${after(tamper)}&theme=console&view=analyst`);
-      ok('analyst: no Verified badge after an INVALID proof_result', tamper.data.valid === false && !badge(doc), 'badge still shown');
+      ok('analyst: after a tamper, still the last genuine verification', tamper.data.valid === false && badge(doc)
+        && !has(doc.getElementById('analyst').textContent, 'failed') && has(doc.getElementById('an-proof').textContent, `${verify.data.rows_checked} rows`), doc.getElementById('an-proof').textContent);
+      doc = await load(`at=${after(tamper)}&theme=console&view=audit`);
+      ok('audit: the tamper result is shown there', doc.querySelectorAll('#ledger li.broken').length > 0, 'no broken rows in the Audit view');
+      doc = await load(`at=${tDone}&theme=console&view=audit`);
+      ok('audit: auto-verify does not change the Audit view timeline', !doc.querySelectorAll('#ledger li.p-ok').length && !doc.getElementById('proof-rows').textContent.match(/^\d/), 'proof shown in Audit before its beat');
+      doc = await load(`at=${tDone}&theme=console&view=analyst`);
 
       // Deal header only after that run's parties_confirmed; the title in clear; never the memo body.
       for (const st of starts.filter((e) => e.data.mode === 'doublethink' && !e.data.plant_careless)) {
@@ -575,6 +603,14 @@
       const href = new URL(doc.getElementById('ws-research').href);
       ok('workspace: "Research safely" opens the Analyst view of the same replay', href.pathname.endsWith('/ui/index.html')
         && href.searchParams.get('view') === 'analyst' && (EV ? href.searchParams.get('events') === EVENTS_NAME : !href.searchParams.has('events')), href.href);
+      const L = (q) => new URLSearchParams(window.Analyst.workspaceLink(q).split('?')[1]);
+      const live = L('?token=abc123&events=re_demo_events.jsonl');
+      ok('workspace link, live: keeps the token, drops events', live.get('token') === 'abc123' && !live.has('events') && live.get('view') === 'analyst' && !live.has('replay'), live.toString());
+      const rep = L('?events=re_demo_events.jsonl');
+      ok('workspace link, replay: keeps events, no token', rep.get('events') === 're_demo_events.jsonl' && !rep.has('token') && rep.get('view') === 'analyst', rep.toString());
+      const forced = L('?token=abc123&replay=1&events=re_demo_events.jsonl');
+      ok('workspace link, token with replay=1: still a replay with its events', forced.get('events') === 're_demo_events.jsonl' && forced.get('replay') === '1', forced.toString());
+      ok('workspace link: a bad events name is dropped', !L('?events=../x.jsonl').has('events') && !L('').has('events'), L('?events=../x.jsonl').toString());
       const canaries = [...new Set(events.filter((e) => e.type === 'memo_loaded').map((e) => e.data.canary).filter(Boolean))];
       ok('workspace: canary never in the DOM', canaries.every((c) => !doc.documentElement.outerHTML.includes(c)), 'canary found');
       const memoBody = (memo.data.text || '').split('\n').map((l) => l.trim()).filter((l) => l.length >= 12 && l !== memo.data.title);
@@ -583,6 +619,95 @@
       const small = smallText(doc, doc.body);
       ok('workspace: every text at least 16px', small.length === 0, small.slice(0, 5).join('; '));
       ok('workspace: loads nothing from outside its origin', doc.defaultView.performance.getEntriesByType('resource').every((e) => new URL(e.name).hostname === '127.0.0.1'), 'external resource');
+    }
+
+    // ---------- poisoned page: the hidden instruction is marked and stays in view ----------
+    {
+      const V = window.RunView;
+      const docs = events.filter((e) => e.type === 'docs_read').flatMap((e) => (e.data.docs || []).map((d) => ({ ev: e, d })));
+      const given = docs.filter((x) => (x.d.highlights || []).length);
+      const wrong = given.filter((x) => JSON.stringify(V.plantedSentences(x.d.excerpt)) !== JSON.stringify(x.d.highlights.map((h) => h.text)));
+      ok('plantedSentences finds exactly the emitter\'s highlights', wrong.length === 0, `${wrong.length} of ${given.length} differ`);
+      const planted = docs.filter((x) => (x.d.highlights || []).length || V.plantedSentences(x.d.excerpt).length);
+      const urls = new Set(planted.map((x) => x.d.url));
+      ok('one poisoned page in the replay, marked', planted.length > 0 && urls.size === 1, `${planted.length} docs, urls ${[...urls].join(', ')}`);
+      ok('plantedSentences returns exact substrings', planted.every((x) => (x.d.highlights && x.d.highlights.length ? x.d.highlights.map((h) => h.text) : V.plantedSentences(x.d.excerpt)).every((t) => x.d.excerpt.includes(t))), 'not a substring');
+
+      // In the Reader room, from each reader job that holds the poisoned page until the run's next job or its end,
+      // the marked line is inside the room's visible area.
+      const inView = (doc) => {
+        const box = doc.getElementById('reader-body');
+        const marks = [...box.querySelectorAll('mark.planted')].filter((m) => visible(doc, m));
+        const r = box.getBoundingClientRect();
+        return marks.some((m) => { const b = m.getBoundingClientRect(); return b.bottom > r.top + 4 && b.top < r.bottom - 4; });
+      };
+      const misses = [];
+      let checked = 0;
+      const readerJobs = events.filter((e) => e.type === 'docs_read' && e.data.by === 'reader'
+        && (e.data.docs || []).some((d) => (d.highlights || []).length || V.plantedSentences(d.excerpt).length));
+      for (const e of readerJobs) {
+        const later = events.filter((x) => x.session_id === e.session_id && x.t_ms >= e.t_ms
+          && (x.t_ms === e.t_ms || !(x.type === 'docs_read' && x.t_ms > e.t_ms)));
+        const stop = events.find((x) => x.session_id === e.session_id && x.type === 'docs_read' && x.t_ms > e.t_ms);
+        // proof_result opens the proof panel in the Reader room's place, so those moments are not Reader-room views.
+        for (const x of later.filter((y) => (!stop || y.t_ms < stop.t_ms) && y.type !== 'proof_result')) {
+          const d = await load(`at=${x.t_ms}&theme=console`);
+          checked += 1;
+          if (!inView(d)) misses.push(`${x.type}@${x.t_ms}`);
+        }
+      }
+      ok(`poisoned page stays in view in the Reader room (${checked} seeks)`, readerJobs.length > 0 && misses.length === 0, misses.join(', '));
+    }
+
+    // ---------- live mode (token present): title wording and the S key ----------
+    // The page is opened with a token, so it is in live mode; /events is not served here, so no event arrives (the
+    // page shows "Live stream lost" and keeps its empty state). Nothing leaves 127.0.0.1.
+    {
+      const liveLoad = async (query) => {
+        await new Promise((resolve) => { frame.onload = resolve; frame.src = `../index.html?token=test-token&${query}`; });
+        for (let i = 0; i < 200; i += 1) {
+          const d = frame.contentDocument;
+          if (d && d.body && d.body.classList.contains('live') && d.getElementById('results')) { await sleep(150); return d; }
+          await sleep(25);
+        }
+        throw new Error('live page did not load');
+      };
+      const key = (d, k) => d.dispatchEvent(new d.defaultView.KeyboardEvent('keydown', { key: k, bubbles: true }));
+      for (const th of ['console', '1984']) {
+        let d = await liveLoad(`theme=${th}&view=audit`);
+        const title = d.getElementById('title');
+        const shown = [...title.querySelectorAll('.title-small')].filter((n) => visible(d, n)).map((n) => n.innerText.trim()).join(' ');
+        ok(`live: title screen does not say offline replay (${th})`, title.classList.contains('show') && !/offline replay/i.test(shown) && /fictional/i.test(shown), shown);
+        // S opens the results screen in live mode, also when the title screen is still up.
+        key(d, 's');
+        ok(`live: S opens the results screen with the title screen up (${th})`, d.getElementById('results').classList.contains('open') && !title.classList.contains('show'), `open=${d.getElementById('results').classList.contains('open')} title=${title.classList.contains('show')}`);
+        key(d, 's');
+        ok(`live: S closes it again (${th})`, !d.getElementById('results').classList.contains('open'), 'still open');
+        d = await liveLoad(`theme=${th}&view=audit&title=0`);
+        key(d, 's');
+        ok(`live: S opens the results screen (${th})`, d.getElementById('results').classList.contains('open'), 'not open');
+      }
+      const d = await liveLoad('theme=console');
+      key(d, 's');
+      ok('live: S opens the results screen over the Analyst view', d.getElementById('results').classList.contains('open') && visible(d, d.getElementById('results')), 'not visible');
+    }
+    {
+      const doc = await load('theme=console&view=audit');
+      const shown = [...doc.querySelectorAll('#title .title-small')].filter((n) => visible(doc, n)).map((n) => n.innerText.trim()).join(' ');
+      ok('replay: title screen still says offline replay', /offline replay/i.test(shown), shown);
+    }
+
+    // ---------- a replay without a results beat never shows the results screen ----------
+    // (Complements the okResults skips: the real estate replay is a demo and must never show the attack results.)
+    if (!HAS_RESULTS) {
+      const opened = [];
+      for (const t of [...new Set(events.filter((e) => e.type === 'beat').map((e) => e.t_ms)), Math.max(...events.map((e) => e.t_ms)) + 1]) {
+        for (const view of ['audit', 'analyst']) {
+          const d = await load(`at=${t}&theme=console&view=${view}`);
+          if (d.getElementById('results').classList.contains('open')) opened.push(`${view}@${t}`);
+        }
+      }
+      ok('no results beat: the results screen never opens during the replay', opened.length === 0, opened.join(', '));
     }
 
     // ---------- regression: the four fixes on main ----------

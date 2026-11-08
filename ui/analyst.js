@@ -27,11 +27,17 @@
     return null;
   }
 
-  // "Verified" only when the run's latest proof_result says valid. A later tamper result (valid: false) removes it.
+  // The Analyst view shows the last genuine verification of the run. A tamper result (proof_result.tampered: true)
+  // checks an edited copy of the bundle, not the run's log, so it is shown only in the Audit view.
+  function lastGenuine(proofs) {
+    const list = (proofs || []).filter((p) => p && !p.tampered);
+    return list.length ? list[list.length - 1] : null;
+  }
+
+  // "Verified" only when the run's latest genuine proof_result is VALID.
   function verified(proofs) {
-    const list = (proofs || []).filter(Boolean);
-    if (!list.length) return false;
-    return list[list.length - 1].valid === true;
+    const p = lastGenuine(proofs);
+    return !!p && p.valid === true;
   }
 
   // The body for POST /api/run from the Analyst question box (FORMATS §11). Throws on an empty or too long question.
@@ -64,5 +70,23 @@
     return s.split(canary).join('').replace(/\s{2,}/g, ' ').trim();
   }
 
-  root.Analyst = Object.freeze({ pickRun, verified, runRequest, answerItems, withoutCanary, MAX_QUESTION });
+  // The "Research safely" link on ui/workspace.html. Live mode is the same rule as app.js: a token, and not
+  // replay=1. Live: the Analyst view with the token and no replay file. Replay: the Analyst view of the same replay
+  // file (events kept when it is not the default).
+  function workspaceLink(search) {
+    const p = new URLSearchParams(search || '');
+    const token = p.get('token');
+    const live = !!token && p.get('replay') !== '1';
+    const out = new URLSearchParams({ view: 'analyst', title: '0' });
+    if (live) {
+      out.set('token', token);
+    } else {
+      const ev = p.get('events') || '';
+      if (/^[a-z0-9_-]+\.jsonl$/.test(ev) && ev !== 'demo_events.jsonl') out.set('events', ev);
+      if (token) { out.set('token', token); out.set('replay', '1'); }
+    }
+    return `index.html?${out.toString()}`;
+  }
+
+  root.Analyst = Object.freeze({ pickRun, verified, lastGenuine, runRequest, workspaceLink, answerItems, withoutCanary, MAX_QUESTION });
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -45,7 +45,7 @@ cost: not measured: the real estate scenario is a demo.
 
 **0:00 (20 s). The opening**
 *Title card: "Fictional associate. Fictional fund. Fictional deal."*
-Meet Tess, a fictional acquisitions associate. Her firm bans AI on live deals. Her memo is Project Larkmoor:
+Meet Maya, a fictional acquisitions associate. Her firm bans AI on live deals. Her memo is Project Larkmoor:
 Larkmoor Wharf, for Fund IV, with $42.5 million financing, and contacts Odile Farrant and Ruaridh Penhallow. She has
 the financials, sponsor ownership, lender quotes, underwriting assumptions and investment committee notes. She wants AI to research comparable transactions and financing
 conditions, but her firm cannot risk disclosing the deal to an outside AI service.

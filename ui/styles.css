@@ -703,11 +703,6 @@ mark.planted {
 .run-sources .run-excluded { color: var(--muted); }
 .run-from { color: var(--muted); }
 
-/* Results by scenario: the corporate memo as "First evaluation" under a real-estate headline. */
-.scenario-name { margin: 0 0 var(--s3); font-weight: 600; }
-.first-eval { margin-top: var(--s5); padding-top: var(--s4); border-top: 1px solid var(--border); max-width: 72rem; }
-.first-eval-title { margin: 0 0 var(--s3); font-size: var(--fs-2); font-weight: 600; }
-.first-eval .bars .bl, .first-eval .bars .bv { font-size: var(--fs-1); }
 
 /* ---------- Analyst view (DESIGN.md section 0d): the default console screen ---------- */
 .analyst { display: none; }
@@ -761,3 +756,4 @@ body.view-audit .analyst { display: none !important; }
 .an-src { font-size: var(--fs-0); color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
 .an-src .mono { font-size: var(--fs-0); }
 .an-meta .mono, .session-pill .mono { font-size: var(--fs-0); }   /* .mono is 0.95em; keep 16px minimum */
+.eval-label { font-size: var(--fs-0); font-weight: 650; color: var(--text-2); margin-bottom: var(--s2); }

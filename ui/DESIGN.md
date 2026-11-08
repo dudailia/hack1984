@@ -115,7 +115,7 @@ events the app already emits (no new fields):
 | Question box | `run_started.question` | Replay: read-only, the recorded question. Live: editable; **Ask** posts `/api/run` `{mode: doublethink, source, plant_careless: false, question}` (source from the header's select, 1 to 500 characters as app/run.py allows). |
 | Answer | `answer` | Each number with subject, period, quote, source title and URL (text, not a link). Scrolls inside its card. |
 | "What left this laptop" | `ledger_row` of that run, through `outbound.js` | `Outbound.summaryText` and `Outbound.check(...).text`, the same lines as the Audit view's strip. Red only on a "yes". |
-| "Verified" badge | `proof_result` of that run | Only when that run's **latest** proof result is VALID. After the recorded tamper (INVALID) the badge goes away and the line says the last check failed. |
+| "Verified" badge | `proof_result` of that run | **Verified on run_done** of that run, so the badge needs no Audit view: live, the existing `POST /api/verify`; replay, the recorded untampered `proof_result` of that session (noted for the Analyst view only, not dispatched, so the Audit view's timeline is unchanged). Shown when the latest **genuine** proof result is VALID. A tamper result (`tampered: true`) checks an edited copy, so it appears only in the Audit view; the Analyst view keeps the last genuine verification. |
 
 - **Which run:** `Analyst.pickRun` (`ui/analyst.js`). Replay: of the doublethink runs started so far, the real-source,
   non-careless one first, then a fake-source non-careless one, then any doublethink run; the latest wins within a
@@ -142,7 +142,9 @@ prototype. Office add-in is roadmap."**
 - The deal name is `memo_loaded.title` of the run `Analyst.pickRun` picks, read from the same replay file
   (`?events=` passes through, same name rule as app.js). No deal name is written in the page or its script.
 - Stage and the documents list are generic mock text, marked "mock", with no deal names.
-- **Research safely** opens `index.html?view=analyst&title=0` (plus `&events=` when given).
+- **Research safely** (`Analyst.workspaceLink`): in replay, `index.html?view=analyst&title=0` plus `&events=` when
+  given; in live mode (a token, not `replay=1`), the Analyst view with the token and without a replay file. The deal
+  name is still read from the replay file (there is no live API for it before a run).
 - Files: `ui/workspace.html`, `ui/workspace.js`, `ui/workspace.css` (console tokens from styles.css). Nothing
   external; 16px minimum; fits 1280x720. Tested in `ui.test.html` and loaded by `ui/check_network.py`.
 
@@ -404,7 +406,11 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
   - Excerpts can be up to 2,000 characters (FORMATS §3). The text scrolls **inside** the browser window
     (`max-height: 12.5em`), and is focusable (`tabindex="0"`, `role="region"`) so it can be scrolled by keyboard.
   - When a poisoned page arrives, the room scrolls to the top of its window, so the tab and address bar stay in
-    view. The excerpt then scrolls just enough to show the planted line.
+    view. The excerpt then scrolls just enough to show the planted line. Tested: from each reader job that holds the
+    poisoned page until the run's next job, the marked line is inside the room's visible area (both replays).
+  - **No highlights in the event** (the real estate replay sends `highlights: []`): the page marks the sentences
+    addressed to AI assistants, agents or models (`RunView.plantedSentences`), labelled "planted instruction (marked
+    by the page)". On the Halyard replay it finds exactly the emitter's highlights. Display only; no check uses it.
   - Below the cards come `reader_claims.data`: `kept` claims with their quotes, and `dropped` claims in muted text
     with `reason`.
 - **Answer bar:** a one-line summary of the `answer` event.
@@ -629,11 +635,15 @@ All motion uses `--ease`. Durations at or under 250ms, except the sequences abov
   on PR #39). `runs` keeps every run in time order and never deletes one, and runs differ in how they were judged:
   1. A run whose `leak_judge` (or, as in the real file, `judge`) text says FALLBACK is **never shown**.
   2. A run counts as scored by the frozen detector only if `detector.matches_checks_frozen` is true.
-  3. For each mode, the screen uses the **most recent** run that passes 1 and 2 and has that mode. False blocks,
-     usefulness and cost are chosen the same way. With none, the screen says "not measured".
+  3. Leak bars: for each mode, the **most recent** run that passes 1 and 2 and has that mode.
+     **False blocks, usefulness and cost** come from the most recent run that passes 1 and carries the figure: the
+     `benign-frozen` and `usefulness` runs judge no leaks, so they have no detector field and need none. With none,
+     the screen says "not measured". (Morning fix: the screen used to say "False blocks: not measured" although
+     benign-frozen carries 0 of 30.)
   4. Under the bars, "Where each number comes from" names each source run: `run N of M`, its label and its commit.
-     The label alone is not unique: the real file has two runs labelled "checks-frozen". Excluded runs are listed as
-     "Not shown: run N of M (scored with the fallback judge)", with no numbers.
+     The label alone is not unique: the real file has two runs labelled "checks-frozen". Runs that feed no figure
+     are listed as "Not shown: run N of M (reason)", with no numbers.
+  5. The 40-attack block is labelled **"First evaluation, corporate deal memo"**.
 
   With the real file (PR #38: three runs), single agent and compromised come from run 2 ("checks-frozen
   rejudged-frozen"), and two minds and two minds + gate from run 3 (batch 2, commit c303c1c). Run 1 (fallback judge,
@@ -643,22 +653,21 @@ All motion uses `--ease`. Durations at or under 250ms, except the sequences abov
   - Test: `ui/tests/fixtures/results_three_runs.json` is shaped like the real file. Its fallback run carries
     distinctive numbers, and the harness checks that none of them appear, that each mode comes from the right run,
     and that a FALLBACK `leak_judge` or a missing detector flag also excludes a run.
-- **Scenarios: real estate as the headline, the corporate memo as "First evaluation"** (`Results.scenarioOf`,
-  `Results.selectScenarios`).
-  - A run belongs to the real-estate scenario if its `scenario` field is `real_estate` (also `real-estate` or
-    `realestate`, any case), or if its label starts with `re-` or contains `real-estate` / `real estate`. Every
-    other run is the corporate deal memo.
-  - Rules 1 to 4 apply within each scenario.
-  - **If at least one real-estate run passes them**, it is the headline: "Real estate scenario", its bars, its sources,
-    and its false blocks, usefulness and cost. Below, a smaller block titled **"First evaluation (corporate deal
-    memo)"** shows the corporate bars and their sources.
-  - **Otherwise** (as in main's results.json today) the screen is the corporate screen exactly as before. A
-    real-estate run judged only by the fallback never becomes the headline.
-  - Test: `ui/tests/fixtures/results_two_scenarios.json` (the three corporate runs plus a fallback and a frozen
-    real-estate run, each with distinctive numbers).
+- **The real estate scenario is a demo, not a measurement.** A run tagged real estate (`scenario` field
+  `real_estate`, or a label starting `re-` or containing `real estate`; `Results.scenarioOf`) never feeds a number on
+  this screen and is listed as "Not shown (real estate scenario: a demo, not a measurement)". No 40-attack number is
+  ever shown next to the real estate scenario. A replay without a results beat (the real estate replay) never opens
+  this screen; the browser harness checks it.
+  - Tests: a five-run fixture shaped like the real file (false blocks from benign-frozen, usefulness and cost from
+    usefulness, leak bars unchanged), `ui/tests/fixtures/results_two_scenarios.json` (no real estate number appears),
+    and the page itself with the checkout's results.json.
 - No bar animation. The numbers are the point.
 
 ## 8. Interaction and accessibility
+
+- **Live mode:** the title screen says "All companies, people and deals are fictional." without "Offline replay"
+  (replay-only words). Any key leaves the title screen, and a shortcut key (S, T, V, A, 1, 2) also does its job, so
+  **S opens the results screen at once** in live mode.
 
 - Every control is a real `<button>`. Focus shows a 3px --focus outline with a 2px offset and is never removed.
 - Keys:
