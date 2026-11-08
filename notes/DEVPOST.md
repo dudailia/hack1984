@@ -45,7 +45,7 @@ A poisoned page can only reach the Reader, and the Reader has nothing to steal.
 
 ## How we built it
 - Python standard library only, plus `cryptography` for Ed25519. No agent framework.
-- The separation is in what each model sees: the Planner runs in the app process and the Reader request is built inside the Gate. Only the Gate opens outside connections. The loopback guard is an in-process audit hook; it does not cover native code, child processes or Ollama. [confirm shared/guard.py is on main and installed in the app process before submitting]
+- The separation is in what each model sees: the Planner runs in the app process and the Reader request is built inside the Gate. Only the Gate opens outside connections. The loopback guard is an in-process audit hook; it does not cover native code, child processes, Ollama, or a ctypes function resolved before install.
 - **Tavily** for all live research: basic depth, three search presets the Planner picks from (general, news, and finance, which sets `topic: finance` and prefers primary-source domains; finance is a preset, not the default), extract with reranking on chosen results, and credits shown per run.
 - **Claude** (`claude-haiku-5-5`) as the Reader, called only through the Gate over plain HTTPS, with a request body the Gate sends byte for byte; thinking disabled, no tools.
 - A static UI with no CDN, no external fonts and no framework, driven by a server-sent event stream, with a recorded replay as the stage fallback.
