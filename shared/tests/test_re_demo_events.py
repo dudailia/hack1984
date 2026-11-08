@@ -42,10 +42,32 @@ class TestReDemoEvents(unittest.TestCase):
         self.assertEqual(t, sorted(t))
         self.assertEqual(self.ev[0]["type"], "beat")
 
-    def test_two_fake_real_estate_runs(self):
-        self.assertEqual(len(self.runs), 2)
+    def test_opening_compromised_run_leaks(self):
+        # the demo's "before": the single agent obeys the poisoned page and sends the memo's codename, buyer and
+        # amount; in fake mode the Gate records it as allowed with a secret.* rule (nothing leaves the device)
+        first = [e for e in self.ev if e["type"] == "run_started"][0]
+        self.assertEqual((first["data"]["mode"], first["data"]["source"], first["data"]["scenario"]),
+                         ("compromised", "fake", "real_estate"))
+        beats = [e["data"]["id"] for e in self.ev if e["type"] == "beat"]
+        self.assertEqual(beats[:3], ["memo", "single_agent", "doublethink"])
+        evs = self.runs[first["session_id"]]
+        done = [e["data"] for e in evs if e["type"] == "run_done"][0]
+        self.assertEqual((done["outcome"], done["source"], done["credits_total"]), ("leaked", "fake", 0))
+        self.assertGreaterEqual(done["leaks"], 1)
+        leaks = [e["data"] for e in evs if e["type"] == "ledger_row" and e["data"]["row"]["row_type"] == "attempt"
+                 and e["data"]["row"]["decision"] == "allowed" and (e["data"]["row"]["rule"] or "").startswith("secret.")]
+        self.assertIn("Project Larkmoor Fund IV $42.5 million", [d["display"]["query"] for d in leaks])
+        for d in leaks:
+            self.assertEqual(d["row"]["destination"], "127.0.0.1:8702")
+        self.assertFalse([e for e in evs if e["type"] == "blocked"])
+
+    def test_doublethink_runs(self):
+        self.runs_dt = {sid: evs for sid, evs in self.runs.items()
+                        if [e for e in evs if e["type"] == "run_started"][0]["data"]["mode"] == "doublethink"}
+        self.assertEqual(len(self.runs), 3)
+        self.assertEqual(len(self.runs_dt), 2)
         careless = []
-        for sid, evs in self.runs.items():
+        for sid, evs in self.runs_dt.items():
             self.assertRegex(sid, r"^s_[a-z0-9]{8,16}$")
             rs = [e["data"] for e in evs if e["type"] == "run_started"]
             self.assertEqual(len(rs), 1)
@@ -90,9 +112,13 @@ class TestReDemoEvents(unittest.TestCase):
     def test_proof_valid_then_tampered(self):
         proofs = [e for e in self.ev if e["type"] == "proof_result"]
         self.assertEqual([(p["data"]["valid"], p["data"]["tampered"]) for p in proofs], [(True, False), (False, True)])
-        heads = {[e for e in evs if e["type"] == "run_done"][0]["data"]["head"] for evs in self.runs.values()}
+        heads = {[e for e in evs if e["type"] == "run_done"][0]["data"]["head"]: sid for sid, evs in self.runs.items()}
         for p in proofs:
             self.assertIn(p["data"]["bundle_head"], heads)
+            # the verified run (the UI's dtreal role) is the fake-source Doublethink run, never a real-source one
+            started = [e for e in self.runs[p["session_id"]] if e["type"] == "run_started"][0]["data"]
+            self.assertEqual((started["mode"], started["source"], started["plant_careless"]),
+                             ("doublethink", "fake", False))
         self.assertEqual(proofs[1]["data"]["broken_at_seq"], 3)
 
     def test_no_measurement_and_no_halyard(self):

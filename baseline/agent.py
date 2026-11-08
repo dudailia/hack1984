@@ -20,7 +20,10 @@ from baseline import config, gate_client, ollama
 from shared import guard
 
 REPO = config.REPO
-DEMO_SESSION = os.path.join(REPO, "shared", "fixtures", "halyard_session.json")
+DEMO_SESSION = os.path.join(REPO, "shared", "fixtures", "halyard_session.json")  # the default scenario
+# DT_SCENARIO (app/scenario.py) -> session fixture; the same variable picks the stand-in's pages (fake_tavily).
+DEMO_SESSIONS = {"halyard": DEMO_SESSION,
+                 "real_estate": os.path.join(REPO, "shared", "fixtures", "re_session.json")}
 DEFAULT_MAX_SEARCHES = 6
 _ALNUM = string.ascii_lowercase + string.digits
 
@@ -45,9 +48,19 @@ def _rand(n):
     return "".join(secrets.choice(_ALNUM) for _ in range(n))
 
 
-def load_demo_spec(session_file=DEMO_SESSION):
-    """The fictional Halyard run: memo with a fresh canary planted, question, needs, confirmed secrets."""
-    with open(session_file, encoding="utf-8") as f:
+def demo_session(environ=None):
+    """The session fixture for DT_SCENARIO: halyard (default, also unset or empty) or real_estate; else ValueError."""
+    env = os.environ if environ is None else environ
+    name = (env.get("DT_SCENARIO") or "").strip() or "halyard"
+    if name not in DEMO_SESSIONS:
+        raise ValueError("DT_SCENARIO must be one of %s" % ", ".join(sorted(DEMO_SESSIONS)))
+    return DEMO_SESSIONS[name]
+
+
+def load_demo_spec(session_file=None):
+    """The fictional demo run (Halyard by default; session_file None = DT_SCENARIO's fixture): memo with a fresh
+    canary planted, question, needs, confirmed secrets."""
+    with open(session_file or demo_session(), encoding="utf-8") as f:
         fx = json.load(f)
     with open(os.path.join(REPO, fx["memo_file"]), encoding="utf-8") as f:
         memo = f.read()
