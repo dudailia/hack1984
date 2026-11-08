@@ -1164,7 +1164,27 @@
       an.proofs[env.session_id] = [];
     } else if (env.type === 'proof_result' && env.session_id) {
       (an.proofs[env.session_id] = an.proofs[env.session_id] || []).push(env.data);
+    } else if (env.type === 'run_done' && env.session_id && window.Analyst
+      && window.Analyst.pickRun(an.runs, LIVE) === env.session_id) {
+      autoVerify(env.session_id);
     }
+  }
+
+  // The Analyst view verifies its run as soon as the run is done, so the Verified badge does not need the Audit view.
+  // Live: the existing POST /api/verify (its proof_result arrives on /events like any other). Replay: the recorded
+  // proof_result for that session (the valid, untampered one), noted for the Analyst view only; it is not dispatched,
+  // so the Audit view's timeline is unchanged.
+  function autoVerify(sid) {
+    const an = S.an;
+    an.autoVerified = an.autoVerified || {};
+    if (an.autoVerified[sid]) return;
+    an.autoVerified[sid] = true;
+    if (LIVE) {
+      api('/api/verify', { session_id: sid }).catch((e) => toast(`Verify failed: ${e.message}`));
+      return;
+    }
+    const rec = R.events.find((e) => e.type === 'proof_result' && e.session_id === sid && !e.data.tampered);
+    if (rec) (an.proofs[sid] = an.proofs[sid] || []).push(rec.data);
   }
 
   function renderAnalyst() {
@@ -1228,14 +1248,14 @@
     $('#an-receipt-check').textContent = s ? check.text : '';
     $('#an-receipt-check').classList.toggle('yes', check.verdict === 'yes');
 
-    // Verified badge only when this run's latest proof_result is VALID.
+    // Verified badge only when this run's latest genuine proof_result is VALID (tamper results: Audit view only).
     const proofs = (sid && S.an.proofs[sid]) || [];
     const ok = A.verified(proofs);
     $('#an-verified').hidden = !ok;
-    const last = proofs[proofs.length - 1];
+    const last = A.lastGenuine(proofs);
     $('#an-proof').textContent = ok
       ? `Signed log checked offline: ${last.rows_checked} rows, bundle ${shortHash(last.bundle_head)}.`
-      : last ? 'Not verified: the last check of the signed log failed.' : 'Not verified yet.';
+      : last ? 'Not verified: the check of the signed log failed.' : s && s.done ? 'Verifying the signed log…' : 'Not verified yet.';
   }
 
   async function onAsk(e) {

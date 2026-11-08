@@ -27,11 +27,17 @@
     return null;
   }
 
-  // "Verified" only when the run's latest proof_result says valid. A later tamper result (valid: false) removes it.
+  // The Analyst view shows the last genuine verification of the run. A tamper result (proof_result.tampered: true)
+  // checks an edited copy of the bundle, not the run's log, so it is shown only in the Audit view.
+  function lastGenuine(proofs) {
+    const list = (proofs || []).filter((p) => p && !p.tampered);
+    return list.length ? list[list.length - 1] : null;
+  }
+
+  // "Verified" only when the run's latest genuine proof_result is VALID.
   function verified(proofs) {
-    const list = (proofs || []).filter(Boolean);
-    if (!list.length) return false;
-    return list[list.length - 1].valid === true;
+    const p = lastGenuine(proofs);
+    return !!p && p.valid === true;
   }
 
   // The body for POST /api/run from the Analyst question box (FORMATS §11). Throws on an empty or too long question.
@@ -64,5 +70,5 @@
     return s.split(canary).join('').replace(/\s{2,}/g, ' ').trim();
   }
 
-  root.Analyst = Object.freeze({ pickRun, verified, runRequest, answerItems, withoutCanary, MAX_QUESTION });
+  root.Analyst = Object.freeze({ pickRun, verified, lastGenuine, runRequest, answerItems, withoutCanary, MAX_QUESTION });
 })(typeof window !== 'undefined' ? window : globalThis);

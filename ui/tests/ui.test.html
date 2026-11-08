@@ -477,7 +477,9 @@
       ok('pickRun: fake before careless when no real run', A.pickRun(runs.slice(0, 2).concat(runs[3]).map((r) => ({ ...r, source: r.sid === 'd' ? 'real' : r.source })), false) === 'b', 'wrong pick');
       ok('pickRun: live shows the latest doublethink run', A.pickRun(runs, true) === 'd', A.pickRun(runs, true));
       ok('pickRun: never the single agent', A.pickRun(runs.slice(0, 1), false) === null, 'picked a single-agent run');
-      ok('verified: only when the latest proof is VALID', A.verified([{ valid: true }]) && !A.verified([{ valid: true }, { valid: false }]) && !A.verified([]), 'wrong');
+      ok('verified: only when the latest genuine proof is VALID', A.verified([{ valid: true }]) && !A.verified([{ valid: true }, { valid: false }]) && !A.verified([]), 'wrong');
+      ok('verified: a tamper result never removes the genuine verification', A.verified([{ valid: true, tampered: false }, { valid: false, tampered: true }])
+        && A.lastGenuine([{ valid: true, rows_checked: 8 }, { valid: false, tampered: true, rows_checked: 3 }]).rows_checked === 8, 'tamper counted');
       const body = A.runRequest('  What are industrial cap rates?  ', 'real');
       ok('runRequest: a Doublethink run with the question', JSON.stringify(body) === JSON.stringify({ mode: 'doublethink', source: 'real', plant_careless: false, question: 'What are industrial cap rates?' }), JSON.stringify(body));
       let threw = 0;
@@ -522,13 +524,25 @@
       ok('analyst: question from run_started', doc.getElementById('an-question').value === one(pick, 'run_started').data.question && doc.getElementById('an-question').readOnly, doc.getElementById('an-question').value);
       ok('analyst: the replay shows the real-source run when there is one', has(doc.getElementById('session-pill').textContent, '') && pick === ROLE.dtreal, `${pick} vs ${ROLE.dtreal}`);
 
-      // Verified badge: absent before verify, present after a VALID proof, absent after the tamper.
+      // Verified badge: verified automatically at run_done (replay: the recorded proof_result), still there after the
+      // recorded tamper, which only the Audit view shows.
       const badge = (d) => visible(d, d.getElementById('an-verified'));
-      ok('analyst: no Verified badge before the proof is checked', !badge(doc), 'badge shown');
+      const rec = events.find((e) => e.type === 'proof_result' && e.session_id === pick && !e.data.tampered);
+      ok('analyst: Verified at run_done without opening the Audit view', !!rec && rec.data.valid === true && badge(doc)
+        && has(doc.getElementById('an-proof').textContent, `${rec.data.rows_checked} rows`), doc.getElementById('an-proof').textContent);
+      const beforeDone = events.filter((e) => e.session_id === pick && e.t_ms < tDone).pop();
+      doc = await load(`at=${beforeDone.t_ms}&theme=console&view=analyst`);
+      ok('analyst: no Verified badge before the run is done', !badge(doc), 'badge shown');
       doc = await load(`at=${after(verify)}&theme=console&view=analyst`);
       ok('analyst: Verified badge after a VALID proof_result', verify.data.valid === true && badge(doc) && has(doc.getElementById('an-proof').textContent, String(verify.data.rows_checked)), doc.getElementById('an-proof').textContent);
       doc = await load(`at=${after(tamper)}&theme=console&view=analyst`);
-      ok('analyst: no Verified badge after an INVALID proof_result', tamper.data.valid === false && !badge(doc), 'badge still shown');
+      ok('analyst: after a tamper, still the last genuine verification', tamper.data.valid === false && badge(doc)
+        && !has(doc.getElementById('analyst').textContent, 'failed') && has(doc.getElementById('an-proof').textContent, `${verify.data.rows_checked} rows`), doc.getElementById('an-proof').textContent);
+      doc = await load(`at=${after(tamper)}&theme=console&view=audit`);
+      ok('audit: the tamper result is shown there', doc.querySelectorAll('#ledger li.broken').length > 0, 'no broken rows in the Audit view');
+      doc = await load(`at=${tDone}&theme=console&view=audit`);
+      ok('audit: auto-verify does not change the Audit view timeline', !doc.querySelectorAll('#ledger li.p-ok').length && !doc.getElementById('proof-rows').textContent.match(/^\d/), 'proof shown in Audit before its beat');
+      doc = await load(`at=${tDone}&theme=console&view=analyst`);
 
       // Deal header only after that run's parties_confirmed; the title in clear; never the memo body.
       for (const st of starts.filter((e) => e.data.mode === 'doublethink' && !e.data.plant_careless)) {
