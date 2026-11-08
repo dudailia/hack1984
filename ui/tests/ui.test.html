@@ -603,6 +603,14 @@
       const href = new URL(doc.getElementById('ws-research').href);
       ok('workspace: "Research safely" opens the Analyst view of the same replay', href.pathname.endsWith('/ui/index.html')
         && href.searchParams.get('view') === 'analyst' && (EV ? href.searchParams.get('events') === EVENTS_NAME : !href.searchParams.has('events')), href.href);
+      const L = (q) => new URLSearchParams(window.Analyst.workspaceLink(q).split('?')[1]);
+      const live = L('?token=abc123&events=re_demo_events.jsonl');
+      ok('workspace link, live: keeps the token, drops events', live.get('token') === 'abc123' && !live.has('events') && live.get('view') === 'analyst' && !live.has('replay'), live.toString());
+      const rep = L('?events=re_demo_events.jsonl');
+      ok('workspace link, replay: keeps events, no token', rep.get('events') === 're_demo_events.jsonl' && !rep.has('token') && rep.get('view') === 'analyst', rep.toString());
+      const forced = L('?token=abc123&replay=1&events=re_demo_events.jsonl');
+      ok('workspace link, token with replay=1: still a replay with its events', forced.get('events') === 're_demo_events.jsonl' && forced.get('replay') === '1', forced.toString());
+      ok('workspace link: a bad events name is dropped', !L('?events=../x.jsonl').has('events') && !L('').has('events'), L('?events=../x.jsonl').toString());
       const canaries = [...new Set(events.filter((e) => e.type === 'memo_loaded').map((e) => e.data.canary).filter(Boolean))];
       ok('workspace: canary never in the DOM', canaries.every((c) => !doc.documentElement.outerHTML.includes(c)), 'canary found');
       const memoBody = (memo.data.text || '').split('\n').map((l) => l.trim()).filter((l) => l.length >= 12 && l !== memo.data.title);

@@ -10,10 +10,9 @@
   const nameEl = document.getElementById('ws-deal-name');
   const link = document.getElementById('ws-research');
 
-  // "Research safely" opens the Analyst view of the same replay.
-  const target = new URLSearchParams({ view: 'analyst', title: '0' });
-  if (EVENTS_NAME !== 'demo_events.jsonl') target.set('events', EVENTS_NAME);
-  link.href = `index.html?${target.toString()}`;
+  // "Research safely" opens the Analyst view: of the same replay in replay mode, live (token kept, no replay file)
+  // when the page was opened with a token.
+  link.href = window.Analyst.workspaceLink(location.search);
 
   let events = [];
   try {

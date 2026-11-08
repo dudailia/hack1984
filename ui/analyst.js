@@ -70,5 +70,23 @@
     return s.split(canary).join('').replace(/\s{2,}/g, ' ').trim();
   }
 
-  root.Analyst = Object.freeze({ pickRun, verified, lastGenuine, runRequest, answerItems, withoutCanary, MAX_QUESTION });
+  // The "Research safely" link on ui/workspace.html. Live mode is the same rule as app.js: a token, and not
+  // replay=1. Live: the Analyst view with the token and no replay file. Replay: the Analyst view of the same replay
+  // file (events kept when it is not the default).
+  function workspaceLink(search) {
+    const p = new URLSearchParams(search || '');
+    const token = p.get('token');
+    const live = !!token && p.get('replay') !== '1';
+    const out = new URLSearchParams({ view: 'analyst', title: '0' });
+    if (live) {
+      out.set('token', token);
+    } else {
+      const ev = p.get('events') || '';
+      if (/^[a-z0-9_-]+\.jsonl$/.test(ev) && ev !== 'demo_events.jsonl') out.set('events', ev);
+      if (token) { out.set('token', token); out.set('replay', '1'); }
+    }
+    return `index.html?${out.toString()}`;
+  }
+
+  root.Analyst = Object.freeze({ pickRun, verified, lastGenuine, runRequest, workspaceLink, answerItems, withoutCanary, MAX_QUESTION });
 })(typeof window !== 'undefined' ? window : globalThis);
