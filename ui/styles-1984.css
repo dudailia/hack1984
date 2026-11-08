@@ -745,3 +745,9 @@ mark.planted {
 .run-sources { margin: var(--sp-1) 0 0; padding-left: 1.2em; color: var(--text-muted); }
 .run-sources li { margin: 2px 0; }
 .run-from { color: var(--text-muted); }
+
+/* Results by scenario: the corporate memo as "First evaluation" under a real-estate headline. */
+.scenario-name { margin: 0 0 var(--sp-3); }
+.first-eval { margin-top: var(--sp-5); padding-top: var(--sp-4); border-top: 1px solid var(--line); }
+.first-eval-title { margin: 0 0 var(--sp-3); font-size: var(--fs-3); }
+.first-eval .bars .bl, .first-eval .bars .bv { font-size: var(--fs-2); }
