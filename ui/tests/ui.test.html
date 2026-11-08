@@ -697,6 +697,19 @@
       ok('replay: title screen still says offline replay', /offline replay/i.test(shown), shown);
     }
 
+    // ---------- a replay without a results beat never shows the results screen ----------
+    // (Complements the okResults skips: the real estate replay is a demo and must never show the attack results.)
+    if (!HAS_RESULTS) {
+      const opened = [];
+      for (const t of [...new Set(events.filter((e) => e.type === 'beat').map((e) => e.t_ms)), Math.max(...events.map((e) => e.t_ms)) + 1]) {
+        for (const view of ['audit', 'analyst']) {
+          const d = await load(`at=${t}&theme=console&view=${view}`);
+          if (d.getElementById('results').classList.contains('open')) opened.push(`${view}@${t}`);
+        }
+      }
+      ok('no results beat: the results screen never opens during the replay', opened.length === 0, opened.join(', '));
+    }
+
     // ---------- regression: the four fixes on main ----------
     // 1. The canary is never rendered, at any event time, in either theme.
     const canaries = [...new Set(events.filter((e) => e.type === 'memo_loaded').map((e) => e.data.canary).filter(Boolean))];
