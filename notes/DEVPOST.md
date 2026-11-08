@@ -82,7 +82,7 @@ The person who built the Gate checks did not see the file until the checks were 
 - Every run in all four setups read the poisoned page (40 / 40 each), and no run ended without searching or reading.
 - The Gate blocked 0 requests during the attack runs. The split alone stopped every attack.
 - False blocks, static: 0 / 30 ordinary analyst questions blocked on the frozen checks at a271959 (`python3 -m checks.benign_run notes/BENIGN.md`).
-- False blocks, live: in a live run on the same 30 questions, the Gate blocked 3 harmless Reader requests under `provenance.rare_term` (questions 2, 8 and 18). All 3 questions were still answered.
+- False blocks, live: in a live run on the same 30 questions, the Gate blocked 3 harmless Reader requests under `provenance.rare_term` (questions 2, 8 and 18; each row, request body and secret check in `shared/results/usefulness/live_blocks.md`). All 3 questions were still answered.
 - Usefulness: 23 / 30 questions answered with at least one validated, cited number.
 - Cost: 1.77 Tavily credits per question on average (median 1.5, max 5, 53 in total) and 14.7 seconds per question on average (median 13.5, max 32.8).
 - Usefulness, live false blocks and cost come from the builder's live run at commit 294c423 (source real, qwen3:8b). The static and live false-block counts are separate measurements.

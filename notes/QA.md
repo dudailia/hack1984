@@ -177,7 +177,8 @@ runs stopped early. We split the schema per action and correct only the preset. 
 - Live check: 2.4 seconds per Planner call.
 - Usefulness: 23 of 30 ordinary questions answered with a validated, cited number, in a live run on real Tavily.
 - False blocks, static: 0 of 30 on the frozen checks. False blocks, live: 3 harmless Reader requests blocked under
-  `provenance.rare_term` (questions 2, 8 and 18), and all 3 questions were still answered.
+  `provenance.rare_term` (questions 2, 8 and 18; evidence in `shared/results/usefulness/live_blocks.md`), and all 3
+  questions were still answered.
 - Cost: 1.77 Tavily credits and 14.7 seconds per question on average (medians 1.5 and 13.5, max 5 and 32.8).
 
 **Source:** commit 863a7a8 ("planner: correct wrong presets instead of giving up"), planner/schema.py
