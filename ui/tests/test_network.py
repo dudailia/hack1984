@@ -1,4 +1,4 @@
-"""The page contacts only 127.0.0.1 during a full replay (both themes): runs ui/check_network.py into a temp file."""
+"""The page and workspace.html contact only 127.0.0.1 (full replay in both views and themes): runs ui/check_network.py into a temp file."""
 import contextlib
 import io
 import os

@@ -702,3 +702,62 @@ mark.planted {
 .run-sources li { margin: 2px 0; }
 .run-sources .run-excluded { color: var(--muted); }
 .run-from { color: var(--muted); }
+
+/* Results by scenario: the corporate memo as "First evaluation" under a real-estate headline. */
+.scenario-name { margin: 0 0 var(--s3); font-weight: 600; }
+.first-eval { margin-top: var(--s5); padding-top: var(--s4); border-top: 1px solid var(--border); max-width: 72rem; }
+.first-eval-title { margin: 0 0 var(--s3); font-size: var(--fs-2); font-weight: 600; }
+.first-eval .bars .bl, .first-eval .bars .bv { font-size: var(--fs-1); }
+
+/* ---------- Analyst view (DESIGN.md section 0d): the default console screen ---------- */
+.analyst { display: none; }
+body.view-analyst .analyst {
+  grid-row: 2 / 6; grid-column: 1; min-height: 0;
+  display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: var(--s4);
+  padding: var(--s4) var(--s5) var(--s5);
+}
+body.view-analyst #steps, body.view-analyst #main, body.view-analyst #outbound, body.view-analyst footer.bottom,
+body.view-analyst header.top .toggle, body.view-analyst .run-opts .check, body.view-analyst #verify { display: none !important; }
+body.view-audit .analyst { display: none !important; }
+#view-toggle[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--accent); color: var(--accent-text); }
+
+.an-col { display: flex; flex-direction: column; gap: var(--s4); min-height: 0; }
+.an-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: var(--s4) var(--s5); }
+.an-card[hidden] { display: none; }
+.an-kicker { display: block; font-size: var(--fs-0); font-weight: 600; color: var(--muted); margin-bottom: var(--s1); }
+.an-deal-title { font-size: var(--fs-3); line-height: 1.2; font-weight: 650; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.an-meta { font-size: var(--fs-0); color: var(--muted); }
+.an-deal .an-meta { margin-top: var(--s1); }
+.an-protected { margin-top: var(--s3); font-size: var(--fs-0); color: var(--text-2); }
+.an-protected .an-tag { display: inline-block; margin: 2px 6px 2px 0; padding: 0 var(--s2); border: 1px solid var(--border); border-radius: 999px; background: var(--sunken); font-size: var(--fs-0); }
+.an-empty { color: var(--muted); }
+
+.an-ask textarea {
+  width: 100%; resize: none; font: inherit; font-size: var(--fs-1); line-height: 1.4; color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--s2) var(--s3); background: var(--card);
+}
+.an-ask textarea[readonly] { background: var(--sunken); }
+.an-ask-row { display: flex; align-items: center; gap: var(--s3); margin-top: var(--s2); }
+.an-ask-row .an-meta { flex: 1; }
+
+.an-receipt-head { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s2); }
+.an-receipt-head h2 { font-size: var(--fs-1); font-weight: 650; flex: 1; }
+.an-verified { display: inline-flex; align-items: center; gap: 6px; padding: 2px var(--s3); border-radius: 999px; font-size: var(--fs-0); font-weight: 650; color: var(--green-text); background: var(--green-bg); border: 1px solid var(--green); }
+.an-verified::before { content: "✓"; }
+.an-verified[hidden] { display: none; }
+.an-receipt-line { font-size: var(--fs-0); color: var(--text-2); margin-top: var(--s1); }
+.an-receipt-line.yes { color: var(--red-text); font-weight: 600; }
+.an-proof { margin-top: var(--s2); }
+
+.an-answer { display: flex; flex-direction: column; min-height: 0; }
+.an-answer h2 { font-size: var(--fs-1); font-weight: 650; margin-bottom: var(--s2); }
+.an-answer-body { flex: 1; min-height: 0; overflow-y: auto; padding-right: var(--s2); }
+.an-q { font-size: var(--fs-0); color: var(--muted); margin-bottom: var(--s3); }
+.an-item { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: var(--s3); padding: var(--s3) 0; border-top: 1px solid var(--border); }
+.an-item:first-of-type { border-top: 0; }
+.an-num { font-size: var(--fs-2); font-weight: 650; color: var(--text); }
+.an-subject { font-size: var(--fs-0); font-weight: 600; color: var(--text); }
+.an-quote { font-size: var(--fs-0); color: var(--text-2); margin-top: 2px; }
+.an-src { font-size: var(--fs-0); color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+.an-src .mono { font-size: var(--fs-0); }
+.an-meta .mono, .session-pill .mono { font-size: var(--fs-0); }   /* .mono is 0.95em; keep 16px minimum */

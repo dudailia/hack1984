@@ -52,6 +52,7 @@
   </div>
   <span id="replay-status" class="replay-status replay-only" aria-live="off">Replay</span>
 
+  <button type="button" id="view-toggle" class="secondary t-console" aria-pressed="false" title="Show every step of the run">Audit view</button>
   <button type="button" id="run" class="primary">Run</button>
   <button type="button" id="verify" class="secondary" title="Key V">Verify proof</button>
 </header>
@@ -65,6 +66,40 @@
     <li data-step="4"><span class="step-n">4</span> <span class="step-label">Cited answer + signed log</span></li>
   </ol>
 </nav>
+
+<!-- Analyst view (console theme, the default): deal, question, answer, receipt, proof badge. DESIGN.md section 0d. -->
+<section id="analyst" class="analyst t-console" aria-label="Analyst view">
+  <div class="an-col an-left">
+    <section id="an-deal" class="an-card an-deal" aria-labelledby="an-deal-title" hidden>
+      <p class="an-kicker">Deal on this laptop</p>
+      <h2 id="an-deal-title" class="an-deal-title"></h2>
+      <p id="an-deal-meta" class="an-meta"></p>
+      <p id="an-protected" class="an-protected"></p>
+    </section>
+    <p id="an-deal-empty" class="an-card an-empty">The deal appears once its flagged names and figures are confirmed.</p>
+    <form id="an-ask" class="an-card an-ask" autocomplete="off">
+      <label for="an-question" class="an-kicker">Research question</label>
+      <textarea id="an-question" rows="3" maxlength="500" placeholder="Ask a question about the public market"></textarea>
+      <div class="an-ask-row">
+        <span id="an-ask-note" class="an-meta"></span>
+        <button type="submit" id="an-ask-btn" class="primary live-only">Ask</button>
+      </div>
+    </form>
+    <section class="an-card an-receipt" aria-labelledby="an-receipt-title">
+      <div class="an-receipt-head">
+        <h2 id="an-receipt-title">What left this laptop</h2>
+        <span id="an-verified" class="an-verified" hidden>Verified</span>
+      </div>
+      <p id="an-receipt-sum" class="an-receipt-line"></p>
+      <p id="an-receipt-check" class="an-receipt-line"></p>
+      <p id="an-proof" class="an-meta"></p>
+    </section>
+  </div>
+  <section class="an-card an-answer" aria-labelledby="an-answer-title">
+    <h2 id="an-answer-title">Answer</h2>
+    <div id="an-answer" class="an-answer-body" role="region" aria-live="polite" tabindex="0" aria-label="Answer with sources"></div>
+  </section>
+</section>
 
 <main id="main" class="main dt">
 
@@ -210,6 +245,7 @@
 <script src="outbound.js"></script>
 <script src="results.js"></script>
 <script src="runview.js"></script>
+<script src="analyst.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

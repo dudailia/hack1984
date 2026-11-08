@@ -6,7 +6,8 @@
 <link rel="icon" href="data:,">
 </head>
 <body>
-<!-- Used by ui/check_network.py: plays the full replay of the real page in an iframe, then lists every resource the
+<!-- Used by ui/check_network.py: plays the full replay of the real page in an iframe (?view=analyst|audit, or
+     ?page=workspace for ui/workspace.html), then lists every resource the
      page and this wrapper loaded (Resource Timing). The browser's own net log is the primary evidence. -->
 <pre id="result">RUNNING</pre>
 <iframe id="f" title="page under test" width="1280" height="720"></iframe>
@@ -15,14 +16,22 @@
 (async () => {
   const q = new URLSearchParams(location.search);
   const theme = q.get('theme') === '1984' ? '1984' : 'console';
+  const view = q.get('view') === 'audit' ? 'audit' : 'analyst';
+  const workspace = q.get('page') === 'workspace';
   const frame = document.getElementById('f');
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  await new Promise((r) => { frame.onload = r; frame.src = `../index.html?title=0&play=1&theme=${theme}`; });
+  const src = workspace ? '../workspace.html' : `../index.html?title=0&play=1&theme=${theme}&view=${view}`;
+  await new Promise((r) => { frame.onload = r; frame.src = src; });
   let status = '';
   let ended = false;
   let resultsShown = false;
+  // ui/workspace.html: wait until it has read the replay file and shown the deal name.
+  for (let i = 0; workspace && i < 600; i += 1) {
+    if (frame.contentDocument.body && frame.contentDocument.body.dataset.ready === '1') { ended = true; status = 'workspace loaded'; break; }
+    await sleep(50);
+  }
   // The fixture lasts 175 s; wait in virtual time until the replay reports its end (■).
-  for (let i = 0; i < 36000; i += 1) {
+  for (let i = 0; !workspace && i < 36000; i += 1) {
     const doc = frame.contentDocument;
     status = (doc.getElementById('replay-status') || {}).textContent || '';
     if (doc.getElementById('results') && doc.getElementById('results').classList.contains('open')) resultsShown = true;
@@ -39,7 +48,7 @@
     try { h = new URL(n).hostname || new URL(n).protocol; } catch (_) { h = n; }
     hosts[h] = (hosts[h] || 0) + 1;
   }
-  document.getElementById('result').textContent = JSON.stringify({ theme, ended, resultsShown, status, hosts, urls: [...new Set(names)] });
+  document.getElementById('result').textContent = JSON.stringify({ theme, view: workspace ? 'workspace' : view, ended, resultsShown, status, hosts, urls: [...new Set(names)] });
 })();
 </script>
 </body>

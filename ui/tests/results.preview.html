@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Results preview</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" id="theme" href="../styles.css">
+<script src="../results.js"></script>
+</head>
+<body>
+<!-- Screenshot aid: renders the results screen from a test fixture (?file=<name>.json in ui/tests/fixtures/,
+     ?theme=1984 for the classic theme). It never reads /shared/results/results.json and is not part of the demo. -->
+<section id="results" class="results open" aria-labelledby="results-title"></section>
+<script>
+'use strict';
+(async () => {
+  const q = new URLSearchParams(location.search);
+  if (q.get('theme') === '1984') document.getElementById('theme').href = '../styles-1984.css';
+  const name = /^[a-z0-9_-]+\.json$/.test(q.get('file') || '') ? q.get('file') : 'results_two_scenarios.json';
+  const data = await (await fetch(`fixtures/${name}`, { cache: 'no-store' })).json();
+  const box = document.getElementById('results');
+  window.Results.render(box, data, { example: false, source: `ui/tests/fixtures/${name} (test fixture)` });
+  // Same look as the ?example=1 banner: these numbers come from a test fixture, not a measurement.
+  const banner = document.createElement('div');
+  banner.className = 'example-banner';
+  banner.setAttribute('role', 'note');
+  const sub = document.createElement('span');
+  sub.className = 'example-banner-sub';
+  sub.textContent = `Rendered by ui/tests/results.preview.html from ui/tests/fixtures/${name}. Not part of the demo.`;
+  banner.append('TEST FIXTURE, not measured', sub);
+  box.prepend(banner);
+})();
+</script>
+</body>
+</html>

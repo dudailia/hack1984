@@ -1,0 +1,46 @@
+/* Doublethink UI: the plug-in prototype page (ui/workspace.html). Uses the console tokens from styles.css.
+   16px minimum, fits 1280x720, nothing external. */
+body.ws {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+}
+.ws-top {
+  display: flex; align-items: center; gap: var(--s4);
+  padding: var(--s3) var(--s5); background: var(--card); border-bottom: 1px solid var(--border);
+}
+.ws-brand { font-size: var(--fs-1); font-weight: 650; flex: 1; }
+.ws-mock, .ws-doc-meta {
+  display: inline-block; padding: 0 var(--s2); border: 1px dashed var(--muted); border-radius: 999px;
+  font-size: var(--fs-0); font-weight: 500; color: var(--muted);
+}
+.ws-label {
+  font-size: var(--fs-0); font-weight: 650; color: var(--text);
+  padding: var(--s1) var(--s3); border: 2px dashed var(--text); border-radius: var(--radius-sm); background: var(--amber-bg);
+}
+.ws-main {
+  display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--s4); padding: var(--s5); min-height: 0;
+}
+.ws-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: var(--s4) var(--s5); }
+.ws-deal { grid-column: 1; }
+.ws-docs { grid-column: 1; align-self: start; }
+.ws-plugin { grid-column: 2; grid-row: 1 / 3; align-self: start; border-color: var(--accent); }
+.ws-kicker { font-size: var(--fs-0); font-weight: 600; color: var(--muted); }
+.ws-deal-name { font-size: var(--fs-3); line-height: 1.2; font-weight: 650; margin: var(--s1) 0 var(--s3); overflow-wrap: anywhere; }
+.ws-facts { display: grid; gap: var(--s2); }
+.ws-facts div { display: grid; grid-template-columns: 6rem minmax(0, 1fr); gap: var(--s3); }
+.ws-facts dt { color: var(--muted); }
+.ws-facts dd { margin: 0; color: var(--text-2); }
+.ws-card h2 { font-size: var(--fs-1); font-weight: 650; margin-bottom: var(--s3); }
+.ws-list { list-style: none; margin: 0; padding: 0; }
+.ws-list li { display: flex; align-items: center; gap: var(--s3); padding: var(--s2) 0; border-top: 1px solid var(--border); }
+.ws-list li:first-child { border-top: 0; }
+.ws-doc { flex: 1; color: var(--text); }
+.ws-plugin-text { color: var(--text-2); margin-bottom: var(--s4); }
+.ws-button {
+  display: inline-block; padding: var(--s2) var(--s5); border-radius: var(--radius);
+  background: var(--accent); color: #FFFFFF; font-weight: 650; font-size: var(--fs-1); text-decoration: none;
+}
+.ws-button:hover { filter: brightness(1.08); }
+.ws-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }

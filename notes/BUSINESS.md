@@ -133,7 +133,7 @@ Two lessons for our pitch, straight from these rows:
   api.anthropic.com, which is on our own allowlist (for Reader jobs). Our answer: the Reader never holds the secret,
   and the Gate builds the Reader request itself. [Aayush to confirm: the Gate pins its own API key and the exact
   endpoint path, not only the host.]
-- **Classifiers miss.** EchoLeak got past Microsoft's injection classifier. That is Willison's 95% point in practice.
+- **Classifiers miss.** EchoLeak got past Microsoft's injection classifier. That is Willison's point in practice: "In application security... 99% is a failing grade!" (https://simonwillison.net/2023/May/2/prompt-injection-explained/, May 2023).
 
 ## 6. The wedge
 

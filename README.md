@@ -32,8 +32,8 @@ Agentforce (ForcedLeak); [notes/BUSINESS.md](notes/BUSINESS.md) lists 13 sourced
 
 The usual fixes do not close this:
 
-- **Egress filters are detectors.** Willison's point: a filter that stops 95% of attacks is a failing grade in
-  security.
+- **Egress filters are detectors.** In Willison's words: "In application security... 99% is a failing grade!"
+  ([Prompt injection explained](https://simonwillison.net/2023/May/2/prompt-injection-explained/), his May 2023 prompt injection talk).
 - **Host allowlists answer "where", not "what".** The leak rides inside a request to an allowed host.
 - **A search query is not private to one company.** Search APIs fan the query out to several sources in real
   time.
@@ -255,6 +255,8 @@ Doublethink builds on published work:
 
 - Simon Willison, [The Dual LLM pattern for building AI assistants that can resist prompt
   injection](https://simonwillison.net/2023/Apr/25/dual-llm-pattern/) (April 2023).
+- Simon Willison, [Prompt injection explained](https://simonwillison.net/2023/May/2/prompt-injection-explained/) (May 2023 talk; source of
+  "In application security... 99% is a failing grade!").
 - Debenedetti et al., Google DeepMind, [Defeating Prompt Injections by Design](https://arxiv.org/abs/2503.18813)
   (CaMeL, March 2025).
 - Beurer-Kellner et al., [Design Patterns for Securing LLM Agents against Prompt

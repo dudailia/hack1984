@@ -7,6 +7,10 @@
 //   3. For each mode, the screen uses the most recent run that passes 1 and 2 and has that mode.
 //   4. Under the bars, the screen says which run each number came from (its label, its place in the file, its
 //      commit), and that fallback runs were left out.
+// Scenarios: a run is the real-estate scenario if its `scenario` field says so (real_estate, real-estate,
+// realestate) or its label starts with "re-" or contains "real-estate"/"real estate"; every other run is the
+// corporate memo. When an eligible real-estate run exists it is the headline and the corporate runs are shown below
+// as "First evaluation"; otherwise the screen shows the corporate runs alone, as before.
 // With ?example=1 the example file has no judge or detector fields; its runs are accepted (unless they say FALLBACK)
 // and every number carries the example label.
 'use strict';
@@ -24,6 +28,14 @@
   const isFallback = (run) => /fallback/i.test(judgeText(run));
   const isFrozen = (run) => !!(run && run.detector && run.detector.matches_checks_frozen === true);
 
+  const RE_SCENARIO = /^real[\s_-]?estate$/i;
+  function scenarioOf(run) {
+    if (!run) return 'corporate';
+    if (typeof run.scenario === 'string' && RE_SCENARIO.test(run.scenario.trim())) return 'real_estate';
+    const label = String(run.label || '').toLowerCase();
+    return label.startsWith('re-') || /real[\s-]estate/.test(label) ? 'real_estate' : 'corporate';
+  }
+
   function eligible(run, example) {
     if (!run || isFallback(run)) return false;
     return example ? true : isFrozen(run);
@@ -32,7 +44,9 @@
   // Pure: which run feeds each mode and each extra figure.
   function select(data, opts) {
     const example = !!(opts && opts.example);
-    const runs = (data && Array.isArray(data.runs) ? data.runs : []).map((run, i) => ({ run, index: i }));
+    const scenario = opts && opts.scenario;
+    const all = (data && Array.isArray(data.runs) ? data.runs : []).map((run, i) => ({ run, index: i }));
+    const runs = scenario ? all.filter((r) => scenarioOf(r.run) === scenario) : all;
     const ok = runs.filter((r) => eligible(r.run, example));
     const latestWith = (pick) => {
       for (let i = ok.length - 1; i >= 0; i -= 1) {
@@ -49,7 +63,9 @@
       return { key, label, value: hit ? hit.value : null, index: hit ? hit.index : null, run: hit ? hit.run : null };
     });
     return {
-      total: runs.length,
+      scenario: scenario || null,
+      eligibleCount: ok.length,
+      total: all.length,
       modes,
       falseBlocks: latestWith((run) => run.false_blocks || null),
       usefulness: latestWith((run) => run.usefulness || null),
@@ -61,6 +77,15 @@
         reason: isFallback(r.run) ? 'scored with the fallback judge' : 'not scored by the frozen detector',
       })),
     };
+  }
+
+  // Pure: the headline selection and, when a real-estate run leads, the corporate "First evaluation" below it.
+  function selectScenarios(data, opts) {
+    const example = !!(opts && opts.example);
+    const re = select(data, { example, scenario: 'real_estate' });
+    const corp = select(data, { example, scenario: 'corporate' });
+    if (re.eligibleCount > 0) return { headline: re, first: corp.eligibleCount > 0 ? corp : null };
+    return { headline: select(data, { example }), first: null };
   }
 
   // "run 2 of 3, “checks-frozen rejudged-frozen”, commit 486a8b6"
@@ -89,42 +114,54 @@
     const short = (h) => (h ? `${String(h).slice(0, 4)}…${String(h).slice(-4)}` : '');
     const num = (text, cls) => el('span', { class: `num-val${cls ? ` ${cls}` : ''}`, 'data-num': '' }, text,
       example ? el('span', { class: 'example-tag' }, EXAMPLE_LABEL) : null);
-    const sel = select(data, { example });
+    const both = selectScenarios(data, { example });
+    const sel = both.headline;
 
-    const grid = el('div', { class: 'bars' });
-    for (const m of sel.modes) {
-      const track = el('div', { class: 'track', 'aria-hidden': 'true' });
-      if (m.value) {
-        const f = el('div', { class: 'fill' });
-        f.style.width = `${(100 * m.value.leaked) / m.value.runs}%`;
-        track.append(f);
+    // Bars plus "Where each number comes from" for one selection.
+    function block(sel, titleCls) {
+      const grid = el('div', { class: 'bars' });
+      for (const m of sel.modes) {
+        const track = el('div', { class: 'track', 'aria-hidden': 'true' });
+        if (m.value) {
+          const f = el('div', { class: 'fill' });
+          f.style.width = `${(100 * m.value.leaked) / m.value.runs}%`;
+          track.append(f);
+        }
+        grid.append(el('div', { class: 'bl' }, m.label), track,
+          el('div', { class: 'bv', 'data-mode': m.key, 'data-run': m.index == null ? '' : String(m.index) },
+            m.value ? num(`${m.value.leaked} / ${m.value.runs}`) : 'not measured'));
       }
-      grid.append(el('div', { class: 'bl' }, m.label), track,
-        el('div', { class: 'bv', 'data-mode': m.key, 'data-run': m.index == null ? '' : String(m.index) },
-          m.value ? num(`${m.value.leaked} / ${m.value.runs}`) : 'not measured'));
+      const groups = [];
+      for (const m of sel.modes) {
+        if (m.index == null) continue;
+        let g = groups.find((x) => x.index === m.index);
+        if (!g) { g = { index: m.index, run: m.run, labels: [] }; groups.push(g); }
+        g.labels.push(m.label);
+      }
+      const missing = sel.modes.filter((m) => m.index == null).map((m) => m.label);
+      const sources = el('ul', { class: 'run-sources' },
+        groups.map((g) => el('li', { 'data-run': String(g.index) },
+          el('strong', null, g.labels.join(', ')), `: ${runName(g.index, g.run, sel.total)}`)),
+        missing.length ? el('li', null, el('strong', null, missing.join(', ')), ': no run scored by the frozen detector') : null,
+        sel.excluded.length ? el('li', { class: 'run-excluded' },
+          `Not shown: ${sel.excluded.map((x) => `run ${x.index + 1} of ${sel.total} (${x.reason})`).join('; ')}.`) : null);
+      return [
+        el('p', { class: `smallprint${titleCls ? ` ${titleCls}` : ''}`, style: 'margin:0 0 0.75rem' }, 'Leaks per setup'),
+        grid,
+        el('p', { class: 'smallprint run-sources-title' }, 'Where each number comes from'),
+        sources,
+      ];
     }
-
-    // Which run each number came from, grouped by run, in mode order.
-    const groups = [];
-    for (const m of sel.modes) {
-      if (m.index == null) continue;
-      let g = groups.find((x) => x.index === m.index);
-      if (!g) { g = { index: m.index, run: m.run, labels: [] }; groups.push(g); }
-      g.labels.push(m.label);
-    }
-    const missing = sel.modes.filter((m) => m.index == null).map((m) => m.label);
-    const sources = el('ul', { class: 'run-sources' },
-      groups.map((g) => el('li', { 'data-run': String(g.index) },
-        el('strong', null, g.labels.join(', ')), `: ${runName(g.index, g.run, sel.total)}`)),
-      missing.length ? el('li', null, el('strong', null, missing.join(', ')), ': no run scored by the frozen detector') : null,
-      sel.excluded.length ? el('li', { class: 'run-excluded' },
-        `Not shown: ${sel.excluded.map((x) => `run ${x.index + 1} of ${sel.total} (${x.reason})`).join('; ')}.`) : null);
 
     const fb = sel.falseBlocks;
     const u = sel.usefulness;
-    const from = (hit) => (hit ? el('span', { class: 'run-from' }, ` (${runName(hit.index, hit.run, sel.total)})`) : null);
+    const from = (hit, s = sel) => (hit ? el('span', { class: 'run-from' }, ` (${runName(hit.index, hit.run, s.total)})`) : null);
     const nm = (hit) => (hit ? num(String(hit.value)) : 'not measured');
     const byRule = fb && fb.value.by_rule ? Object.entries(fb.value.by_rule).map(([k, v]) => `${k} ${v}`).join(', ') : '';
+
+    const first = both.first ? el('section', { class: 'first-eval', 'data-scenario': 'corporate' },
+      el('h3', { class: 'first-eval-title' }, 'First evaluation (corporate deal memo)'),
+      block(both.first, 'first-eval-sub')) : null;
 
     box.classList.toggle('is-example', example);
     box.replaceChildren(...[
@@ -133,10 +170,8 @@
       el('h2', { id: 'results-title', class: 'results-title' },
         num(String(data.attacks_total), 'big'), ' attacks, written and hashed before the code.'),
       el('p', { class: 'sha' }, `attack file sha256 ${short(data.attack_file_sha256)}`),
-      el('p', { class: 'smallprint', style: 'margin:0 0 0.75rem' }, 'Leaks per setup'),
-      grid,
-      el('p', { class: 'smallprint run-sources-title' }, 'Where each number comes from'),
-      sources,
+      sel.scenario === 'real_estate' ? el('p', { class: 'scenario-name', 'data-scenario': 'real_estate' }, 'Real estate scenario') : null,
+      el('div', { class: 'headline-eval', 'data-scenario': sel.scenario || 'all' }, block(sel)),
       fb ? el('p', { class: 'fb' }, 'False blocks on normal questions: ',
         num(`${fb.value.blocked} / ${fb.value.total}`, fb.value.blocked > 0 ? 'bad' : ''),
         byRule ? el('span', { class: 'smallprint' }, `  ${byRule}`) : null, from(fb))
@@ -145,10 +180,11 @@
         num(`${u.value.answered_with_cited_number} / ${u.value.total}`), from(u)) : null,
       el('p', { class: 'smallprint' }, 'Tavily credits per question ', nm(sel.creditsPerQuestion), from(sel.creditsPerQuestion),
         ' · seconds per question ', nm(sel.secondsPerQuestion), from(sel.secondsPerQuestion)),
+      first,
       el('p', { class: 'smallprint' }, `from ${source}`),
     ].filter(Boolean));
     return sel;
   }
 
-  root.Results = Object.freeze({ select, render, isFallback, isFrozen, EXAMPLE_LABEL, MODES });
+  root.Results = Object.freeze({ select, selectScenarios, scenarioOf, render, isFallback, isFrozen, EXAMPLE_LABEL, MODES });
 })(typeof window !== 'undefined' ? window : globalThis);

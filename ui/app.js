@@ -35,7 +35,9 @@
   const params = new URLSearchParams(location.search);
   const TOKEN = params.get('token');
   const LIVE = !!TOKEN && params.get('replay') !== '1';
-  const FIXTURE = '/shared/fixtures/demo_events.jsonl';
+  // ?events=<name>.jsonl picks another replay file from /shared/fixtures/ (same origin only); default demo_events.
+  const EVENTS_NAME = /^[a-z0-9_-]+\.jsonl$/.test(params.get('events') || '') ? params.get('events') : 'demo_events.jsonl';
+  const FIXTURE = `/shared/fixtures/${EVENTS_NAME}`;
   const RESULTS_REAL = '/shared/results/results.json';
   const RESULTS_EXAMPLE = '/shared/fixtures/results_example.json';
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -60,6 +62,23 @@
   }
   applyTheme(theme);
   const classic = () => theme === '1984';
+
+  // ---------- view: Analyst (default, console theme) or Audit (the full three-panel screen) ----------
+  // ?view=audit opens the Audit view; the header button switches. The 1984 theme always shows the Audit view.
+  let chosenView = params.get('view') === 'audit' ? 'audit' : 'analyst';
+  const currentView = () => (classic() ? 'audit' : chosenView);
+  function applyView() {
+    const v = currentView();
+    document.body.classList.toggle('view-analyst', v === 'analyst');
+    document.body.classList.toggle('view-audit', v === 'audit');
+    const b = $('#view-toggle');
+    if (b) {
+      b.textContent = v === 'analyst' ? 'Audit view' : 'Analyst view';
+      b.setAttribute('aria-pressed', v === 'audit' ? 'true' : 'false');
+      b.title = v === 'analyst' ? 'Show every step of the run' : 'Back to the analyst screen';
+    }
+  }
+  applyView();
 
   // Both theme variants of one piece of text or nodes.
   const dual = (c1984, cConsole) => [el('span', { class: 't-classic' }, c1984), el('span', { class: 't-console' }, cConsole)];
@@ -87,6 +106,7 @@
       fakeDest: null,
       beat: null,
       proofOpen: false,
+      an: { runs: [], questions: {}, proofs: {} },   // Analyst view: run starts, questions, proof results per run
     };
   }
 
@@ -143,7 +163,7 @@
   }
 
   // Split text into plain and matched segments. terms: [{text, label}], longest first, non-overlapping.
-  // ci = case-insensitive (used for redaction, so "PROJECT HALYARD" is hidden like "Project Halyard").
+  // ci = case-insensitive (used for redaction, so "PROJECT NAME" is hidden like "Project Name").
   function splitTerms(text, terms, ci = false) {
     const list = terms.filter((t) => t.text).sort((a, b) => b.text.length - a.text.length);
     const hay = ci ? text.toLowerCase() : text;
@@ -1126,10 +1146,115 @@
     },
   };
 
+  // ---------- Analyst view (DESIGN.md section 0d) ----------
+  // Built only from events already on screen elsewhere: run_started (mode, source, question), memo_loaded (title,
+  // sha), parties_confirmed (labels), ledger_row (receipt via outbound.js), answer, proof_result. Never the memo
+  // body, never the canary.
+  function noteAnalyst(env) {
+    const an = S.an;
+    if (env.type === 'run_started') {
+      const d = env.data || {};
+      an.runs = an.runs.filter((r) => r.sid !== env.session_id);
+      an.runs.push({ sid: env.session_id, mode: d.mode, source: d.source, careless: !!d.plant_careless, order: env.seq ?? an.runs.length });
+      an.questions[env.session_id] = typeof d.question === 'string' ? d.question : '';
+      an.proofs[env.session_id] = [];
+    } else if (env.type === 'proof_result' && env.session_id) {
+      (an.proofs[env.session_id] = an.proofs[env.session_id] || []).push(env.data);
+    }
+  }
+
+  function renderAnalyst() {
+    if (!$('#analyst') || !window.Analyst) return;
+    const A = window.Analyst;
+    const sid = A.pickRun(S.an.runs, LIVE);
+    const s = sid ? S.sessions[sid] : null;
+    const clean = (t) => A.withoutCanary(t, s && s.canary);
+
+    // Deal header: only after this run's parties_confirmed. The title in clear (the analyst's own deal), no memo body.
+    const ready = !!(s && s.secretsReady && s.title);
+    $('#an-deal').hidden = !ready;
+    $('#an-deal-empty').hidden = ready;
+    if (ready) {
+      $('#an-deal-title').textContent = clean(s.title);
+      fill($('#an-deal-meta'), [s.sha ? ['memo sha ', el('span', { class: 'mono', title: s.sha }, shortHash(s.sha))] : '',
+        s.source ? ` · web source: ${s.source === 'real' ? 'api.tavily.com' : 'local stand-in'}` : '']);
+      const labels = [...new Set(s.secrets.map((x) => x.label))];
+      fill($('#an-protected'), labels.length
+        ? ['Kept on this laptop: ', labels.map((l) => el('span', { class: 'an-tag' }, l))]
+        : 'No flagged names or figures.');
+    }
+
+    // Question box: the recorded question in replay; an editable box in live mode.
+    const q = $('#an-question');
+    const asked = sid ? clean(S.an.questions[sid] || (s && s.answer && s.answer.question) || '') : '';
+    if (LIVE) {
+      q.readOnly = false;
+      if (!q.value && asked && document.activeElement !== q) q.value = asked;
+      $('#an-ask-note').textContent = s && !s.done ? 'Researching…' : 'Runs Doublethink: the deal stays on this laptop.';
+    } else {
+      q.readOnly = true;
+      q.value = asked;
+      $('#an-ask-note').textContent = asked ? 'Replay: the recorded question.' : 'Replay: no question yet.';
+    }
+
+    // Answer with its sources, from the answer event.
+    const box = $('#an-answer');
+    if (!s) {
+      fill(box, el('p', { class: 'an-empty' }, 'No research yet.'));
+    } else if (!s.answer) {
+      fill(box, el('p', { class: 'an-empty' }, s.done ? `No answer. Run ended: ${window.RunView.outcomeText(s.done)}.` : 'Waiting for the answer…'));
+    } else {
+      const items = A.answerItems(s.answer);
+      fill(box, [
+        items.length ? null : el('p', { class: 'an-empty' }, 'No cited numbers found.'),
+        items.map((it) => el('div', { class: 'an-item' },
+          el('div', { class: 'an-num' }, fmtValue(it.value, it.unit)),
+          el('div', null,
+            el('div', { class: 'an-subject' }, clean(`${it.subject}${it.period ? ` · ${it.period}` : ''}`)),
+            el('div', { class: 'an-quote' }, `“${clean(it.quote)}”`),
+            el('div', { class: 'an-src' }, clean(it.title), ' · ', el('span', { class: 'mono' }, clean(it.url)))))),
+      ]);
+    }
+
+    // Receipt: what left this laptop for this run, computed by outbound.js from its ledger rows.
+    const O = window.Outbound;
+    const sum = O.summarize(s ? s.rows : []);
+    const check = O.check(sum);
+    $('#an-receipt-sum').textContent = s ? O.summaryText(sum) : 'Nothing has left this laptop yet.';
+    $('#an-receipt-check').textContent = s ? check.text : '';
+    $('#an-receipt-check').classList.toggle('yes', check.verdict === 'yes');
+
+    // Verified badge only when this run's latest proof_result is VALID.
+    const proofs = (sid && S.an.proofs[sid]) || [];
+    const ok = A.verified(proofs);
+    $('#an-verified').hidden = !ok;
+    const last = proofs[proofs.length - 1];
+    $('#an-proof').textContent = ok
+      ? `Signed log checked offline: ${last.rows_checked} rows, bundle ${shortHash(last.bundle_head)}.`
+      : last ? 'Not verified: the last check of the signed log failed.' : 'Not verified yet.';
+  }
+
+  async function onAsk(e) {
+    e.preventDefault();
+    if (!LIVE) { toast('Replay: the question is the recorded one. Live mode asks for real.'); return; }
+    let body;
+    try { body = window.Analyst.runRequest($('#an-question').value, $('#source').value); } catch (err) { toast(err.message); return; }
+    setRunBusy(true);
+    try {
+      const j = await api('/api/run', body);
+      toast(`Research started: ${j && j.session_id ? j.session_id : 'doublethink'}.`);
+    } catch (err) {
+      const cur = S.current && S.sessions[S.current];
+      if (!(cur && !cur.done)) setRunBusy(false);
+      toast(`Run failed: ${err.message}`);
+    }
+  }
+
   function dispatch(env, o = { instant: false }) {
     const h = handlers[env.type];
     if (!h) { console.warn('unknown event type', env.type, env); return; }
     try { h(env, o); } catch (e) { console.error('handler failed', env.type, e); }
+    try { noteAnalyst(env); renderAnalyst(); } catch (e) { console.error('analyst view failed', env.type, e); }
     // The step strip moves on event types the run already emits (run_started resets the step to 0 first).
     if (env.session_id && window.RunView) {
       const s = session(env.session_id);
@@ -1193,6 +1318,7 @@
     setEye(false, false);
     showRunSummary(null, false);
     renderProofStatic(null);
+    renderAnalyst();
   }
 
   function seek(ms) {
@@ -1376,6 +1502,12 @@
   $('#mode-single').addEventListener('click', () => setUiMode('single'));
   $('#mode-dt').addEventListener('click', () => setUiMode('dt'));
   $('#run').addEventListener('click', onRun);
+  $('#an-ask').addEventListener('submit', onAsk);
+  $('#view-toggle').addEventListener('click', () => {
+    chosenView = currentView() === 'analyst' ? 'audit' : 'analyst';
+    applyView();
+    renderAnalyst();
+  });
   $('#verify').addEventListener('click', onVerify);
   $('#proof-verify').addEventListener('click', onVerify);
   $('#proof-tamper').addEventListener('click', onTamper);
@@ -1404,7 +1536,7 @@
       case 'v': toggleProof(); break;
       case 'a': toggleSheet(); break;
       case 's': toggleResults(); break;
-      case 't': applyTheme(classic() ? 'console' : '1984'); toast(classic() ? 'Theme: 1984. Press T for the console theme.' : 'Theme: console. Press T for the 1984 theme.'); break;
+      case 't': applyTheme(classic() ? 'console' : '1984'); applyView(); toast(classic() ? 'Theme: 1984. Press T for the console theme.' : 'Theme: console. Press T for the 1984 theme.'); break;
       default: return;
     }
   });

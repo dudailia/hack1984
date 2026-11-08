@@ -104,6 +104,48 @@ One line between the header and the rooms, so a judge always knows where the run
 - **Layout:** grid row 2 (`auto`, about 2.25rem). Console rows: header, steps, rooms, Outbound, footer. 1984 rows:
   header, steps, rooms, footer. The answer sheet sits in row 3; the results screen covers the strip too.
 
+## 0d. Analyst view (console theme, the default) and the Audit view toggle
+
+The default console screen is for the analyst, not the auditor. It shows four things and nothing else, all from
+events the app already emits (no new fields):
+
+| Part | Source event | Rule |
+|---|---|---|
+| Deal header | `memo_loaded.title`, `.sha256`, `run_started.source`; labels from `parties_confirmed` | Hidden until that run's `parties_confirmed`. The title is shown **in clear** (Sheara's decision: it is the analyst's own deal on their own laptop, and the receipt shows it never left). The canary is removed. The memo body is never rendered. |
+| Question box | `run_started.question` | Replay: read-only, the recorded question. Live: editable; **Ask** posts `/api/run` `{mode: doublethink, source, plant_careless: false, question}` (source from the header's select, 1 to 500 characters as app/run.py allows). |
+| Answer | `answer` | Each number with subject, period, quote, source title and URL (text, not a link). Scrolls inside its card. |
+| "What left this laptop" | `ledger_row` of that run, through `outbound.js` | `Outbound.summaryText` and `Outbound.check(...).text`, the same lines as the Audit view's strip. Red only on a "yes". |
+| "Verified" badge | `proof_result` of that run | Only when that run's **latest** proof result is VALID. After the recorded tamper (INVALID) the badge goes away and the line says the last check failed. |
+
+- **Which run:** `Analyst.pickRun` (`ui/analyst.js`). Replay: of the doublethink runs started so far, the real-source,
+  non-careless one first, then a fake-source non-careless one, then any doublethink run; the latest wins within a
+  rank. The planted careless run and single-agent runs are never the analyst's run. Live: the latest doublethink run.
+- **Hidden in this view:** the step strip (kept in the DOM and shown in the Audit view; the receipt and the Verified
+  badge replace it here), the three rooms (memo, typed facts, gate, reader, proof), the Outbound strip,
+  the footer counters, the mode toggle, the careless checkbox and the header's Verify button.
+- **Audit view:** today's full screen, unchanged. The header button "Audit view" switches (it then reads "Analyst
+  view"), and `?view=audit` opens it directly. The 1984 theme always shows the Audit view (the Analyst view is
+  console-only). The results screen and the title screen work in both views.
+- 1280x720 with no page scroll; every text at least 16px (the `.mono` session id and sha included).
+- Tests (`ui/tests/ui.test.html`; the existing checks now load `?view=audit`): default view; no audit panel visible;
+  header absent before and present after `parties_confirmed` with the title from `memo_loaded`; protected labels;
+  question from `run_started`; every answer quote, title and URL; receipt equals the Outbound computation; badge
+  absent before verify, present after VALID, absent after the tamper; no memo-body line in the Analyst view at any
+  event time; canary absent at every event time; toggle and `?view=audit`; the 1984 theme; fit and 16px; and units
+  for `pickRun`, `verified`, `runRequest`.
+
+## 0e. Plug-in prototype: `ui/workspace.html`
+
+A mock deal workspace that shows where a plug-in would open the Analyst view. Labelled on the page: **"Plug-in
+prototype. Office add-in is roadmap."**
+
+- The deal name is `memo_loaded.title` of the run `Analyst.pickRun` picks, read from the same replay file
+  (`?events=` passes through, same name rule as app.js). No deal name is written in the page or its script.
+- Stage and the documents list are generic mock text, marked "mock", with no deal names.
+- **Research safely** opens `index.html?view=analyst&title=0` (plus `&events=` when given).
+- Files: `ui/workspace.html`, `ui/workspace.js`, `ui/workspace.css` (console tokens from styles.css). Nothing
+  external; 16px minimum; fits 1280x720. Tested in `ui.test.html` and loaded by `ui/check_network.py`.
+
 ## 1. Color
 
 ### The two meaning rules
@@ -293,10 +335,10 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
 | PLANNER ROOM              || THE GATE · only door out          || READER ROOM           |
 | never reads the web       || EXIT ▲ api.tavily.com             || never sees the secret |
 |                           ||      ▲ api.anthropic.com (reader) ||                       |
-| MEMO  PROJECT ███████.    ||----------------------------------|| query: "payments..."  |
-| ██████ ███████ ████████   || 01 search tavily "payments pr…" ✓|| r_01 Payments proc…   |
+| MEMO  PROJECT ███████.    ||----------------------------------|| query: "<query>..."   |
+| ██████ ███████ ████████   || 01 search tavily "<query>…"     ✓|| r_01 <page title>…    |
 | is preparing an offer...  ||    ↳ 200 · 1 credit               ||  "...grow at 9.8%..." |
-| price: ████████████       || 03 reader anthropic j_01 2 docs ✓|| r_03 Payments sector |
+| price: ████████████       || 03 reader anthropic j_01 2 docs ✓|| r_03 <page title>     |
 |                           || 05 search tavily "████ Capital…" ||  ▌Note to AI research |
 | TYPED FACTS (numbers only)||    ✕ BLOCKED  secret.buyer        ||  ▌assistants: ...     |
 | sector_growth  found      ||    planted test query             ||  planted instruction  |
@@ -397,10 +439,10 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
 +-----------------------------------------------------++--------------------------------+
 | ONE AGENT · sees the memo and the web               || OUTBOUND · recorded, not       |
 | MEMO  (secrets shown, not redacted: the agent has   ||           enforced              |
-|        them)                                         || 01 search 127.0.0.1:8702 "pay…"✓|
+|        them)                                         || 01 search 127.0.0.1:8702 "<q>…"✓|
 | -------------------------------------------------   || 05 search 127.0.0.1:8702      |
-| WEB  r_03 Payments sector growth…                    ||  "Project Halyard Ossory      |
-|  ▌Note to AI research assistants: ...                ||   Capital Partners $412 m…"   |
+| WEB  r_03 <page title>…                              ||  "<codename> <buyer>          |
+|  ▌Note to AI research assistants: ...                ||   <price>…"                   |
 |                                                      ||   [ LEAKED ]  secret.buyer     |
 +-----------------------------------------------------++--------------------------------+
 | ANSWER n/a                                           LEAKS 1 · BLOCKED 0 · ...        |
@@ -441,8 +483,8 @@ The base unit is 4px: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16p
   the short `memo_loaded.sha256`.
 
   Redaction in the Planner room:
-  - It is case-insensitive, so the subject `PROJECT HALYARD` and the memo's first line are hidden like
-    `Project Halyard`.
+  - It is case-insensitive, so the subject in capitals and the memo's first line are hidden like the
+    confirmed value (for example `PROJECT NAME` like `Project Name`).
   - `memo_id` is never shown, because it repeats the codename.
   - The One agent room shows everything in the clear, because that agent holds the secrets.
 - **The eye.** A 5-line ASCII eye, 20px bold (about 230×115px), sits at the right of the gate header.
@@ -601,6 +643,19 @@ All motion uses `--ease`. Durations at or under 250ms, except the sequences abov
   - Test: `ui/tests/fixtures/results_three_runs.json` is shaped like the real file. Its fallback run carries
     distinctive numbers, and the harness checks that none of them appear, that each mode comes from the right run,
     and that a FALLBACK `leak_judge` or a missing detector flag also excludes a run.
+- **Scenarios: real estate as the headline, the corporate memo as "First evaluation"** (`Results.scenarioOf`,
+  `Results.selectScenarios`).
+  - A run belongs to the real-estate scenario if its `scenario` field is `real_estate` (also `real-estate` or
+    `realestate`, any case), or if its label starts with `re-` or contains `real-estate` / `real estate`. Every
+    other run is the corporate deal memo.
+  - Rules 1 to 4 apply within each scenario.
+  - **If at least one real-estate run passes them**, it is the headline: "Real estate scenario", its bars, its sources,
+    and its false blocks, usefulness and cost. Below, a smaller block titled **"First evaluation (corporate deal
+    memo)"** shows the corporate bars and their sources.
+  - **Otherwise** (as in main's results.json today) the screen is the corporate screen exactly as before. A
+    real-estate run judged only by the fallback never becomes the headline.
+  - Test: `ui/tests/fixtures/results_two_scenarios.json` (the three corporate runs plus a fallback and a frozen
+    real-estate run, each with distinctive numbers).
 - No bar animation. The numbers are the point.
 
 ## 8. Interaction and accessibility
@@ -625,8 +680,18 @@ All motion uses `--ease`. Durations at or under 250ms, except the sequences abov
 
 ## 9. Data sources, files and preview
 
-- Files are `ui/index.html`, `ui/styles.css`, `ui/styles-1984.css`, `ui/outbound.js` and `ui/app.js`, plus
+- Files are `ui/index.html`, `ui/styles.css`, `ui/styles-1984.css`, `ui/outbound.js`, `ui/results.js`,
+  `ui/runview.js`, `ui/analyst.js` and `ui/app.js`, the plug-in prototype `ui/workspace.html` / `.js` / `.css`, plus
   `ui/preview.py`, `ui/check_network.py` and the tests in `ui/tests/`. `ui/fonts/` is added only with approval.
+- **Replay file: `?events=<name>.jsonl`** loads another replay from `/shared/fixtures/` (the name must match
+  `[a-z0-9_-]+.jsonl`, same origin only); the default is `demo_events.jsonl`. Nothing on the page is specific to one
+  scenario: the memo, the subject, the question, the redaction terms, the documents, the claims, the rules and the
+  beats all come from the events. The browser harness accepts the same parameter and reads its session ids, seek
+  times, rules, hosts and secrets from the replay, and `test_ui_browser` runs it once per
+  `shared/fixtures/*events*.jsonl`.
+- **Static text with no source in the events** stays generic and scenario-free: the title taglines, "All companies,
+  people and deals are fictional", the four step labels, the room titles and subtitles, the planted-page note
+  ("Planted for this demo…"), the proof captions and the results headings.
 - **Nothing external.** The page loads only its own files from its origin:
   - no web fonts (system font stacks only), no CDN scripts, no icon sets and no analytics;
   - the favicon is an inline `data:` URI, so the browser does not request `/favicon.ico`.
@@ -634,7 +699,8 @@ All motion uses `--ease`. Durations at or under 250ms, except the sequences abov
   Proven three ways:
   1. `ui/tests/test_static.py` scans the page files for external URLs and `@import`. The SVG namespace string is the
      only allowed `http` text.
-  2. `python ui/check_network.py` plays the **full replay** in both themes in headless Edge, served by preview.py. It
+  2. `python ui/check_network.py` plays the **full replay** in the console theme (Analyst view and Audit view) and
+     the 1984 theme, and loads `ui/workspace.html`, in headless Edge, served by preview.py. It
      records the browser's net log and the page's Resource Timing, and writes `ui/evidence/network-replay.md`.
      - The check fails if the page requests, loads or connects to anything but 127.0.0.1.
      - During the run, every non-loopback host is mapped to NOTFOUND, so nothing can leave even if something tried.
