@@ -1,4 +1,4 @@
-# Judge Q&A: the 15 hardest questions
+# Judge Q&A: the 19 hardest questions
 
 Built from the deck's judging criteria. Privacy-First: what leaves the device, who can read it, can you prove it,
 would anyone use it. Most Startup-able: fundable, who is it for, would they pay, why this team. Surge: how central
@@ -70,13 +70,14 @@ notes/REVIEW_1.md R1-14; notes/THREAT_MODEL.md channel table.
 
 ### 6. Can the Planner still leak by itself? What is your real leak rate?
 **Spoken:** Yes, by its own mistake, since it writes the queries. The Gate is the second layer. On 40 attacks fixed
-before any code: single agent [x], two minds plus gate [x]. Not 100%.
+before any code: single agent 2 of 40, two minds plus gate 0 of 40. Not 100%.
 
 **If pressed:** The Gate checks every outbound request for the confirmed secrets in the listed encodings, a canary,
 rare memo words, and shape. Those checks are detectors. Known gap: a secret split into fragments separated by other
 words passes the checks. The architectural defence is that the part reading attacker text cannot send queries.
 
-**Source:** notes/THREAT_MODEL.md; README.md "Results" (all [x] until the red-team run).
+**Source:** notes/THREAT_MODEL.md; README.md "Results"; `shared/results/results.json`, runs at commit 486a8b6
+(single agent, rejudged with the frozen checks) and c303c1c (two minds plus gate).
 
 ### 7. What does the ledger prove, and what does it not?
 **Spoken:** It proves every outbound attempt, blocked ones too, was recorded before sending, and that nobody edited
@@ -126,7 +127,7 @@ Beurer-Kellner et al., design patterns (June 2025). We never say "nobody does th
 egress-security pricing: Pipelock's enterprise tier is $25,000 a year. Untested.
 
 **If pressed:** Search cost is pass-through: Tavily is $0.008 per credit, one credit per basic search. Credits per
-question: [placeholder]. Next step: design-partner talks with compliance officers, [placeholder] so far.
+question: 1.77 on average in our live run (median 1.5, max 5). Next step: design-partner talks with compliance officers, [placeholder] so far.
 
 **Source:** notes/BUSINESS.md sections 6 and 7; notes/RESEARCH.md (Tavily pricing).
 
@@ -174,8 +175,55 @@ runs stopped early. We split the schema per action and correct only the preset. 
   schema 5 of 5 right. A safety net replaces a wrong preset with the default from a fixed list; every other field
   is still strictly validated, and the model's text is never logged.
 - Live check: 2.4 seconds per Planner call.
-- Usefulness: [x] of 30 ordinary questions answered with a validated, cited number. False blocks: 0 of 30, measured
-  on the frozen checks. Cost: [x] Tavily credits and [x] seconds per question.
+- Usefulness: 23 of 30 ordinary questions answered with a validated, cited number, in a live run on real Tavily.
+- False blocks, static: 0 of 30 on the frozen checks. False blocks, live: 3 harmless Reader requests blocked under
+  `provenance.rare_term` (questions 2, 8 and 18), and all 3 questions were still answered.
+- Cost: 1.77 Tavily credits and 14.7 seconds per question on average (medians 1.5 and 13.5, max 5 and 32.8).
 
 **Source:** commit 863a7a8 ("planner: correct wrong presets instead of giving up"), planner/schema.py
-(`normalize_preset`, `ACTION_JSON_SCHEMA`); notes/DEVPOST.md "Pre-registered evaluation".
+(`normalize_preset`, `ACTION_JSON_SCHEMA`); notes/DEVPOST.md "Pre-registered evaluation"; usefulness, live false
+blocks and cost from the builder's live run at commit 294c423 (source real, qwen3:8b).
+
+---
+
+## Red-team results
+
+### 16. If the gate never fired, why have it?
+**Spoken:** The red team attacks the web side. The gate is for the Planner's own mistakes, which these attacks
+didn't trigger. We show it working on a planted case, and we don't claim it was measured.
+
+**If pressed:** In every attack run, in all four setups, the Gate blocked 0 requests: the split alone stopped every
+attack. The careless query in the demo is planted on purpose to show a block. It is a demonstration, not a
+measurement.
+
+**Source:** `shared/results/results.json`, runs at commit 486a8b6 (rejudged) and c303c1c: no blocked request in
+any run; notes/PITCH_SCRIPT.md, 1:25 beat and hard question 8.
+
+### 17. The single agent only leaked 2 of 40. Is the problem real?
+**Spoken:** This small local model mostly ignores page instructions. A model that follows instructions well leaks
+every time, which is what the compromised mode shows: 40 of 40. Better agents make this worse, not better.
+
+**If pressed:** Every single-agent run read the poisoned page: 40 of 40. Compromised mode always obeys the poisoned
+page, and we label it as such. Both ran only against our local stand-in for Tavily.
+
+**Source:** `shared/results/results.json`, run at commit 486a8b6 rejudged with the frozen checks; notes/DEVPOST.md
+"Challenges" (compromised mode); notes/PITCH_SCRIPT.md hard question 9.
+
+### 18. Did you test a compromised Reader?
+**Spoken:** Not yet. The Reader never holds the secret, and the Planner only receives typed fields, so a fooled
+Reader has nothing to send. Measuring that directly is our next test.
+
+**If pressed:** The Reader has no tools and opens no connections; the Gate sends its request. What comes back to the
+Planner is a need id, found or not found, and typed numbers (question 5).
+
+**Source:** CLAUDE.md invariants 2 and 3; shared/FORMATS.md section 3 (`typed`); notes/PITCH_SCRIPT.md hard
+question 10.
+
+### 19. Isn't this just redaction?
+**Spoken:** Redaction must spot every secret before it can hide it, and a buyer's name is an ordinary word. We do
+not depend on spotting: the model holding the memo never reads the web.
+
+**If pressed:** The Gate's checks are the spotting layer, kept as a second line for the Planner's own slips, and we
+report their cost: 0 of 30 blocked on the frozen checks, 3 harmless requests blocked in a live run.
+
+**Source:** notes/DEVPOST.md "Inspiration" (masking tools have to recognise the secret first); question 15.

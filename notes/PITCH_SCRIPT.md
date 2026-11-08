@@ -45,16 +45,15 @@ signed bundle. Anyone can check it offline. Valid. Now I change one byte. Invali
 
 **2:05 (25 s). The numbers**
 *Results screen.*
-On Friday, before we wrote any code, we wrote 40 attacks and published their hash. The people building the gate
-never saw them. Single agent: [x] of 40 runs leaked. Compromised agent: [x]. Two minds: [x]. Two minds plus the
-gate: [x]. On 30 normal research questions, the gate wrongly blocked [x].
+On Friday, before writing any code, we wrote 40 attacks and published their hash. A normal single agent leaked
+in 2 of 40. A compromised one, in all 40. Doublethink: 0 of 40, and every run read the poisoned page. The split
+alone stopped them. The gate never had to fire.
 
 **2:30 (25 s). Limits and buyer**
 *Limits slide.*
-It is not 100%, and nobody can honestly claim that. The local model's own slips are caught by detectors. There is
-a usefulness cost: [x] of 30 questions answered with a cited number. This builds on the Dual LLM pattern and
-Google DeepMind's CaMeL. Our buyer: the compliance officer at a registered private equity adviser or M&A
-broker-dealer, who has to approve research agents.
+Not 100%. Planner slips are caught by detectors. There is a usefulness cost: 23 of 30 questions answered with a
+cited number, and in a live run the gate blocked 3 harmless requests. We build on Dual LLM and CaMeL. Our buyer:
+compliance officers at registered private equity advisers and M&A broker-dealers, who must approve research agents.
 
 **2:55 (5 s). Close**
 The cloud model never sees your secret. The local model never reads the web.
@@ -70,13 +69,14 @@ we fixed before writing code.
 **2. "Can the Planner still leak by itself?"**
 Yes, by its own mistake, because it holds the secret and writes the queries. That is why the gate exists: it
 checks every outbound request for the confirmed secrets in any encoding, a planted canary, and rare memo words
-that have not appeared in public text. Those checks are detectors, so we report what they cost: [x] false blocks
-on 30 normal questions.
+that have not appeared in public text. Those checks are detectors, so we report what they cost, as two separate
+numbers. Static, on the frozen checks: 0 of 30 normal questions blocked. Live, on the same 30 questions: the gate
+blocked 3 harmless Reader requests under the rare-term rule, and all 3 of those questions were still answered.
 
 **3. "What do you lose?"**
 The planner cannot react to arbitrary web text, only to typed numbers, so open-ended research is weaker. That is
-the trade the published design patterns make on purpose. Measured on 30 normal questions: [x] answered with a
-validated, cited number, at [x] Tavily credits and [x] seconds per question.
+the trade the published design patterns make on purpose. Measured live on 30 normal questions: 23 answered with a
+validated, cited number, at 1.77 Tavily credits and 14.7 seconds per question on average.
 
 **4. "Your proof is signed by your own code."**
 Correct. The bundle proves what this install logged, that the log was not edited afterwards, and which gate and
@@ -100,3 +100,15 @@ Not in any reported case we could find, and we do not claim one. What is documen
 15 U.S.C. 80b-4a), SEC fines for policy failures with no trade alleged, and the same injection mechanism leaking
 data from shipping products such as Microsoft 365 Copilot (EchoLeak) and Salesforce Agentforce (ForcedLeak).
 Sources are in notes/BUSINESS.md.
+
+**8. "If the gate never fired, why have it?"**
+The red team attacks the web side. The gate is for the Planner's own mistakes, which these attacks didn't trigger.
+We show it working on a planted case, and we don't claim it was measured.
+
+**9. "The single agent only leaked 2 of 40. Is the problem real?"**
+This small local model mostly ignores page instructions. A model that follows instructions well leaks every time,
+which is what the compromised mode shows: 40 of 40. Better agents make this worse, not better.
+
+**10. "Did you test a compromised Reader?"**
+Not yet. The Reader never holds the secret, and the Planner only receives typed fields, so a fooled Reader has
+nothing to send. Measuring that directly is our next test.

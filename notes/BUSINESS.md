@@ -171,7 +171,7 @@ What anchors it (sourced):
   That is the argument, not proof anyone will pay.
 
 What we do not know:
-- Tavily credits per research question: [x], from our benign run.
+- Tavily credits per research question: 1.77 on average (median 1.5, max 5), from our live benign run at commit 294c423.
 - Claude Reader cost per question: [x].
 - What a CCO at a [placeholder]-person PE adviser actually pays for compliance tooling today: [placeholder].
 - Willingness to pay: [placeholder, ask Misneach and FuzionX at the fair what evidence they want].
@@ -256,12 +256,12 @@ Unconfirmed: the other judges and which people judge each prize.
    Gate writes the request. [Aayush to confirm: the Gate pins its own key and the exact endpoint path.]
 
 7. **"The local model can still leak by mistake. What is your real leak rate?"**
-   Single agent: [x] of 40. Two minds plus gate: [x] of 40. Attacks hashed on Friday, before any code, and the
+   Single agent: 2 of 40. Two minds plus gate: 0 of 40, and the gate never fired. Attacks hashed on Friday, before any code, and the
    check builder never saw them. Not 100%, and we do not claim it.
 
 8. **"What does it cost in usefulness?"**
-   The planner only sees numbers, so open-ended research is weaker. [x] of 30 normal questions answered with a cited
-   number, [x] Tavily credits and [x] seconds per question.
+   The planner only sees numbers, so open-ended research is weaker. 23 of 30 normal questions answered with a cited
+   number, at 1.77 Tavily credits and 14.7 seconds per question on average (live run, commit 294c423).
 
 9. **"How big is the market?"**
    3,184 FINRA member firms and 16,544 investment advisers (2025 counts). The share that does M&A or advises PE funds
