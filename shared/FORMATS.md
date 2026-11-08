@@ -336,8 +336,9 @@ Envelope (one per line in the replay file, one per SSE frame live):
 ```
 - `display.query`: the exact query (the page is local). `summary`: set on reader rows, for example "reading job
   j_01: 2 documents". `detail`: from the check result. The page highlights confirmed secret values that appear
-  literally in `display.query`. An `allowed` attempt row whose `rule` is non-null is a recorded leak (fake-only
-  modes).
+  literally in `display.query`. An `allowed` attempt row (fake-only modes) is a recorded leak only if its `rule`
+  is `canary` (exact) or starts with `secret.` or `provenance.`; `shape.*` and `gate.*` don't count (as
+  `run_done.leaks` below).
 
 **blocked** (right after the ledger_row of a blocked attempt; it drives the stop-at-the-wall animation)
 ```json
@@ -416,3 +417,5 @@ the `X-DT-Token` header).
   or starts with secret. or provenance.; shape.* and gate.* don't count. (Agreed by Ilia and Anant.)
 - 2026-11-07: §10 run_done drops the old `leaks` definition (allowed attempts with a non-null rule); only the
   canary, secret.* and provenance.* rule above remains.
+- 2026-11-08: §10 ledger_row note: a recorded leak uses the same rule as run_done.leaks (canary, secret.*,
+  provenance.*), replacing "rule is non-null". Text only.
