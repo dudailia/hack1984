@@ -212,7 +212,7 @@ simpler exact-match judge and then rejudged with the frozen checks; the table sh
 | Measure | Value |
 |---|---|
 | Benign questions wrongly blocked by the frozen checks (static) | 0 of 30 |
-| Harmless requests blocked by the gate in a live run on the same 30 (live) | 3, all under `provenance.rare_term`; all 3 questions still answered |
+| Harmless requests blocked by the gate in a live run on the same 30 (live) | 3, all under `provenance.rare_term`; all 3 questions still answered (evidence: `shared/results/usefulness/live_blocks.md`) |
 | Benign questions answered with a validated, cited number (live) | 23 of 30 |
 | Tavily credits per question (live) | mean 1.77, median 1.5, max 5, 53 in total |
 | Seconds per question (live) | mean 14.7, median 13.5, max 32.8 |
