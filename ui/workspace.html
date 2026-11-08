@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deal workspace (prototype)</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="workspace.css">
+</head>
+<body class="ws">
+<!-- Plug-in prototype: a mock deal workspace with a "Research safely" button that opens the Analyst view.
+     The deal name comes from the replay events (memo_loaded.title); stage and documents are generic mock text.
+     DESIGN.md section 0e. -->
+<header class="ws-top">
+  <div class="ws-brand">Deal workspace <span class="ws-mock">mock</span></div>
+  <p id="ws-label" class="ws-label">Plug-in prototype. Office add-in is roadmap.</p>
+</header>
+
+<main class="ws-main">
+  <section class="ws-card ws-deal" aria-labelledby="ws-deal-name">
+    <p class="ws-kicker">Deal</p>
+    <h1 id="ws-deal-name" class="ws-deal-name">Loading…</h1>
+    <dl class="ws-facts">
+      <div><dt>Stage</dt><dd id="ws-stage">Due diligence (mock)</dd></div>
+      <div><dt>Status</dt><dd>Confidential. Do not paste into AI tools.</dd></div>
+    </dl>
+  </section>
+
+  <section class="ws-card ws-docs" aria-labelledby="ws-docs-title">
+    <h2 id="ws-docs-title">Documents (mock)</h2>
+    <ul class="ws-list">
+      <li><span class="ws-doc">Deal memo</span><span class="ws-doc-meta">confidential</span></li>
+      <li><span class="ws-doc">Signed NDA</span><span class="ws-doc-meta">confidential</span></li>
+      <li><span class="ws-doc">Market research notes</span><span class="ws-doc-meta">draft</span></li>
+    </ul>
+  </section>
+
+  <section class="ws-card ws-plugin" aria-labelledby="ws-plugin-title">
+    <h2 id="ws-plugin-title">Doublethink</h2>
+    <p class="ws-plugin-text">Research the public market for this deal. The deal stays on this laptop; only checked
+      queries and public page text leave, and every request is in a signed log.</p>
+    <a id="ws-research" class="ws-button" href="index.html?view=analyst&amp;title=0">Research safely</a>
+  </section>
+</main>
+
+<script src="analyst.js"></script>
+<script src="workspace.js"></script>
+</body>
+</html>
