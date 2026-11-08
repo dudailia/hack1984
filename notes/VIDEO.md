@@ -1,6 +1,6 @@
 # Demo video: shot list
 
-Devpost rules: the demo video must be 3 to 5 minutes long and on YouTube. Target: 3:23. Minimum 3:00, maximum
+Devpost rules: the demo video must be 3 to 5 minutes long and on YouTube. Target: 3:15. Minimum 3:00, maximum
 5:00. Size 1280x720.
 
 Voiceover lines are from notes/PITCH_SCRIPT.md (the script and its hard-question answers), trimmed to fit. At
@@ -34,11 +34,11 @@ that is not in that file.
 | 4 | 1:25 to 1:38 (13 s) | The answer sheet: each number with its quote and source link | Live, from a separate run with source real | "And it still answers. Sector growth: [number from the live run]. Listed peers: a median of [number from the live run] times revenue, computed in code. Every number shows the sentence it came from and its source." | Separate run on real Tavily search. Numbers parsed from verbatim quotes and computed in code. |
 | 5 | 1:38 to 1:58 (20 s) | Doublethink with careless query ticked, Run. The row turns red with its rule. | Live (replay fallback) | "What if the local model slips by itself and writes the buyer into a query? That is the second layer. Every outbound request goes through one gate, the only process allowed on the network. It caught this one: blocked, rule '[rule name on the red row]', logged before anything was sent." | A careless Planner query, planted on purpose to show the gate. |
 | 6 | 1:58 to 2:22 (24 s) | Verify proof: VALID with the signer key; hold 2 s. Tamper one byte: INVALID at the row; hold 2 s. | Live (replay fallback) | "Every request, blocked ones too, is written to a hash-chained log before it leaves, and the session exports as a signed bundle. Anyone can check it offline. Valid. (hold) Now I change one byte. Invalid. (hold) The bundle proves what this install logged, and that the log was not edited afterwards." | Ed25519-signed bundle, checked by `proof/verify.py`. Signer key [first 16 hex of the fingerprint]. |
-| 7 | 2:22 to 2:48 (26 s) | Results screen (key S), real results only | Live (the screen reads `shared/results/results.json`) | "On Friday, before writing any code, we wrote 40 attacks and published their hash. The file is in our repo, so anyone can check it. A normal single agent leaked in 2 of 40. A compromised one, in all 40. Doublethink: 0 of 40, and every one of those runs read the poisoned page. The split alone stopped them. The gate never had to fire." | Attack file SHA-256 961d2320...41d1be, fixed Friday Nov 6. Single and compromised agents measured at commit 486a8b6 (rejudged with the frozen checks), two minds and Doublethink at c303c1c. |
-| 8 | 2:48 to 3:17 (29 s) | Limits slide | [Deck slide or a text card: confirm which] | "It is not 100%, and nobody can honestly claim that. The local model's own slips are caught by detectors. There is a usefulness cost: [x] of 30 questions answered with a cited number, and in a live run the gate blocked [x] harmless requests. This builds on the Dual LLM pattern and Google DeepMind's CaMeL. Our buyer: the compliance officer at a registered private equity adviser or M&A broker-dealer, who has to approve research agents." | Prior art: Willison, Dual LLM (2023); Debenedetti et al., CaMeL (2025). |
-| 9 | 3:17 to 3:23 (6 s) | Title screen or the memo again | Live | "The cloud model never sees your secret. The local model never reads the web." | [repo link] |
+| 7 | 2:22 to 2:43 (21 s) | Results screen (key S), real results only | Live (the screen reads `shared/results/results.json`) | "On Friday, before writing any code, we wrote 40 attacks and published their hash. A normal single agent leaked in 2 of 40. A compromised one, in all 40. Doublethink: 0 of 40, and every run read the poisoned page. The split alone stopped them. The gate never had to fire." | Attack file SHA-256 961d2320...41d1be, fixed Friday Nov 6. Single and compromised agents measured at commit 486a8b6 (rejudged with the frozen checks), two minds and Doublethink at c303c1c. |
+| 8 | 2:43 to 3:09 (26 s) | Limits slide | [Deck slide or a text card: confirm which] | "Not 100%. Planner slips are caught by detectors. There is a usefulness cost: 23 of 30 questions answered with a cited number, and in a live run the gate blocked 3 harmless requests. We build on Dual LLM and CaMeL. Our buyer: compliance officers at registered private equity advisers and M&A broker-dealers, who must approve research agents." | Prior art: Willison, Dual LLM (2023); Debenedetti et al., CaMeL (2025). |
+| 9 | 3:09 to 3:15 (6 s) | Title screen or the memo again | Live | "The cloud model never sees your secret. The local model never reads the web." | [repo link] |
 
-Total: 3:23. If a cut runs short, add hold time in shots 2, 3 and 6 first, so the video never drops below 3:00.
+Total: 3:15. If a cut runs short, add hold time in shots 2, 3 and 6 first, so the video never drops below 3:00.
 Do not pad with new claims.
 
 ## Before upload
@@ -51,6 +51,6 @@ Do not pad with new claims.
   `from /shared/results/results.json`.
 - Any replay shot carries the replay caption.
 - No terminal, `.env`, key or token visible in any frame.
-- Length between 3:00 and 5:00 (target 3:23), exported at 1280x720.
+- Length between 3:00 and 5:00 (target 3:15), exported at 1280x720.
 - Uploaded to YouTube with the visibility the Devpost rules require ([check: public or unlisted]); the link goes in
   notes/DEVPOST.md and in notes/EXPO_RUNBOOK.md section 3.

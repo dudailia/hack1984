@@ -45,17 +45,15 @@ signed bundle. Anyone can check it offline. Valid. Now I change one byte. Invali
 
 **2:05 (25 s). The numbers**
 *Results screen.*
-On Friday, before writing any code, we wrote 40 attacks and published their hash. The file is in our repo, so
-anyone can check it. A normal single agent leaked in 2 of 40. A compromised one, in all 40. Doublethink: 0 of 40,
-and every one of those runs read the poisoned page. The split alone stopped them. The gate never had to fire.
+On Friday, before writing any code, we wrote 40 attacks and published their hash. A normal single agent leaked
+in 2 of 40. A compromised one, in all 40. Doublethink: 0 of 40, and every run read the poisoned page. The split
+alone stopped them. The gate never had to fire.
 
 **2:30 (25 s). Limits and buyer**
 *Limits slide.*
-It is not 100%, and nobody can honestly claim that. The local model's own slips are caught by detectors. There is
-a usefulness cost: [x] of 30 questions answered with a cited number, and in a live run the gate blocked [x]
-harmless requests. This builds on the Dual LLM pattern and
-Google DeepMind's CaMeL. Our buyer: the compliance officer at a registered private equity adviser or M&A
-broker-dealer, who has to approve research agents.
+Not 100%. Planner slips are caught by detectors. There is a usefulness cost: 23 of 30 questions answered with a
+cited number, and in a live run the gate blocked 3 harmless requests. We build on Dual LLM and CaMeL. Our buyer:
+compliance officers at registered private equity advisers and M&A broker-dealers, who must approve research agents.
 
 **2:55 (5 s). Close**
 The cloud model never sees your secret. The local model never reads the web.
@@ -71,13 +69,14 @@ we fixed before writing code.
 **2. "Can the Planner still leak by itself?"**
 Yes, by its own mistake, because it holds the secret and writes the queries. That is why the gate exists: it
 checks every outbound request for the confirmed secrets in any encoding, a planted canary, and rare memo words
-that have not appeared in public text. Those checks are detectors, so we report what they cost: on the frozen
-checks, 0 of 30 normal questions blocked; in a live run, [x] harmless requests blocked.
+that have not appeared in public text. Those checks are detectors, so we report what they cost, as two separate
+numbers. Static, on the frozen checks: 0 of 30 normal questions blocked. Live, on the same 30 questions: the gate
+blocked 3 harmless Reader requests under the rare-term rule, and all 3 of those questions were still answered.
 
 **3. "What do you lose?"**
 The planner cannot react to arbitrary web text, only to typed numbers, so open-ended research is weaker. That is
-the trade the published design patterns make on purpose. Measured on 30 normal questions: [x] answered with a
-validated, cited number, at [x] Tavily credits and [x] seconds per question.
+the trade the published design patterns make on purpose. Measured live on 30 normal questions: 23 answered with a
+validated, cited number, at 1.77 Tavily credits and 14.7 seconds per question on average.
 
 **4. "Your proof is signed by your own code."**
 Correct. The bundle proves what this install logged, that the log was not edited afterwards, and which gate and

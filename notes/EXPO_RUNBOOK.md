@@ -201,6 +201,6 @@ replay.
 | Answer bar | "And it still answers. Every number shows the sentence it came from and its source, and any arithmetic is done in code." |
 | Point at a red row from a careless run | "If the local model slips by itself and writes the buyer into a query, every outbound request still goes through one gate, the only process allowed on the network. Blocked, and logged before anything was sent." |
 | **Verify proof**, then **Tamper one byte** | "Every request, blocked ones too, is in a hash-chained log, and the session exports as a signed bundle anyone can check offline. Valid. Change one byte. Invalid." |
-| Close | "It is not 100%; we measured [x] of 40 pre-registered attacks leaking with the gate. The cloud model never sees your secret. The local model never reads the web." |
+| Close | "Not 100%, but on 40 pre-registered attacks Doublethink leaked 0 times. The split stopped them; the gate never had to fire. The cloud model never sees your secret. The local model never reads the web." |
 
 If the results are not in yet, end on the last two sentences only.

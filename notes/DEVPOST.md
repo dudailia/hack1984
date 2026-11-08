@@ -49,7 +49,13 @@ A poisoned page can only reach the Reader, and the Reader has nothing to steal.
 - **Who can read it.** Tavily can read the queries. Anthropic can read the public page text, that already-public query and the Reader's fixed instructions. The Planner runs locally on Ollama, so the memo is never sent to a model provider.
 - **What never leaves.** The memo, the confirmed names, the price and the codename. The Planner holds them and never reads the web; the Reader never sees them; the Gate blocks any outbound request that contains them, in the listed encodings, or the canary.
 - **How to prove it.** Every outbound request, blocked ones included, is in a hash-chained ledger written before sending. Each session exports as an Ed25519-signed bundle that a standalone verifier checks offline, without our code. Signer key fingerprint: [fingerprint].
-- **Would anyone use it.** [usefulness: x / 30 ordinary analyst questions answered with at least one validated, cited number]. We have no customers yet.
+- **Would anyone use it.** In a live run on real Tavily, 23 of 30 ordinary analyst questions were answered with at least one validated, cited number. We have no customers yet.
+
+## How a deal team adopts it
+1. **Compliance approves.** The chief compliance officer reviews what leaves the device (above) and a sample signed log, and approves Doublethink as the firm's path for AI research on live deals.
+2. **IT installs it locally.** The Planner runs on the firm's own machine on Ollama, and only the Gate opens outside connections. The cloud model is meant to be the firm's approved one. Today the Reader calls Anthropic (`claude-haiku-5-5`) only; swapping the Reader endpoint to another approved provider is not built yet.
+3. **The associate drops in the memo and confirms the flagged terms.** Doublethink flags the codename, buyer, price and people, and the associate confirms which are secret and which are public before anything is sent. Not built yet: today the memo and its confirmed terms come from a session file (`shared/fixtures/halyard_session.json`).
+4. **They get a cited answer and a signed log.** Every number in the answer shows its quote and source link. The session exports as an Ed25519-signed bundle that compliance can verify offline.
 
 ## How we built it
 - Python standard library only, plus `cryptography` for Ed25519. No agent framework.
@@ -76,9 +82,10 @@ The person who built the Gate checks did not see the file until the checks were 
 - Every run in all four setups read the poisoned page (40 / 40 each), and no run ended without searching or reading.
 - The Gate blocked 0 requests during the attack runs. The split alone stopped every attack.
 - False blocks, static: 0 / 30 ordinary analyst questions blocked on the frozen checks at a271959 (`python3 -m checks.benign_run notes/BENIGN.md`).
-- False blocks in a live run: [x] harmless requests blocked.
-- Usefulness: [x] / 30 questions answered with at least one validated, cited number.
-- Cost: [x] Tavily credits and [x] seconds per question.
+- False blocks, live: in a live run on the same 30 questions, the Gate blocked 3 harmless Reader requests under `provenance.rare_term` (questions 2, 8 and 18). All 3 questions were still answered.
+- Usefulness: 23 / 30 questions answered with at least one validated, cited number.
+- Cost: 1.77 Tavily credits per question on average (median 1.5, max 5, 53 in total) and 14.7 seconds per question on average (median 13.5, max 32.8).
+- Usefulness, live false blocks and cost come from the builder's live run at commit 294c423 (source real, qwen3:8b). The static and live false-block counts are separate measurements.
 - Every run is reported, including runs after fixes. None were deleted. Commands to reproduce are in the README.
 
 ## What testing found

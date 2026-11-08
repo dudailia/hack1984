@@ -1,4 +1,4 @@
-# Judge Q&A: the 18 hardest questions
+# Judge Q&A: the 19 hardest questions
 
 Built from the deck's judging criteria. Privacy-First: what leaves the device, who can read it, can you prove it,
 would anyone use it. Most Startup-able: fundable, who is it for, would they pay, why this team. Surge: how central
@@ -127,7 +127,7 @@ Beurer-Kellner et al., design patterns (June 2025). We never say "nobody does th
 egress-security pricing: Pipelock's enterprise tier is $25,000 a year. Untested.
 
 **If pressed:** Search cost is pass-through: Tavily is $0.008 per credit, one credit per basic search. Credits per
-question: [placeholder]. Next step: design-partner talks with compliance officers, [placeholder] so far.
+question: 1.77 on average in our live run (median 1.5, max 5). Next step: design-partner talks with compliance officers, [placeholder] so far.
 
 **Source:** notes/BUSINESS.md sections 6 and 7; notes/RESEARCH.md (Tavily pricing).
 
@@ -175,12 +175,14 @@ runs stopped early. We split the schema per action and correct only the preset. 
   schema 5 of 5 right. A safety net replaces a wrong preset with the default from a fixed list; every other field
   is still strictly validated, and the model's text is never logged.
 - Live check: 2.4 seconds per Planner call.
-- Usefulness: [x] of 30 ordinary questions answered with a validated, cited number. False blocks: 0 of 30 on the
-  frozen checks (static); [x] harmless requests blocked in a live run. Cost: [x] Tavily credits and [x] seconds per
-  question.
+- Usefulness: 23 of 30 ordinary questions answered with a validated, cited number, in a live run on real Tavily.
+- False blocks, static: 0 of 30 on the frozen checks. False blocks, live: 3 harmless Reader requests blocked under
+  `provenance.rare_term` (questions 2, 8 and 18), and all 3 questions were still answered.
+- Cost: 1.77 Tavily credits and 14.7 seconds per question on average (medians 1.5 and 13.5, max 5 and 32.8).
 
 **Source:** commit 863a7a8 ("planner: correct wrong presets instead of giving up"), planner/schema.py
-(`normalize_preset`, `ACTION_JSON_SCHEMA`); notes/DEVPOST.md "Pre-registered evaluation".
+(`normalize_preset`, `ACTION_JSON_SCHEMA`); notes/DEVPOST.md "Pre-registered evaluation"; usefulness, live false
+blocks and cost from the builder's live run at commit 294c423 (source real, qwen3:8b).
 
 ---
 
@@ -216,3 +218,12 @@ Planner is a need id, found or not found, and typed numbers (question 5).
 
 **Source:** CLAUDE.md invariants 2 and 3; shared/FORMATS.md section 3 (`typed`); notes/PITCH_SCRIPT.md hard
 question 10.
+
+### 19. Isn't this just redaction?
+**Spoken:** Redaction must spot every secret before it can hide it, and a buyer's name is an ordinary word. We do
+not depend on spotting: the model holding the memo never reads the web.
+
+**If pressed:** The Gate's checks are the spotting layer, kept as a second line for the Planner's own slips, and we
+report their cost: 0 of 30 blocked on the frozen checks, 3 harmless requests blocked in a live run.
+
+**Source:** notes/DEVPOST.md "Inspiration" (masking tools have to recognise the secret first); question 15.
