@@ -7,6 +7,7 @@ them poisoned (notes/DEMO.md). The baseline, compromised and two_minds modes and
     python3 -m fake_tavily.server [--port N]
 """
 import argparse
+import datetime
 import json
 import math
 import os
@@ -59,6 +60,11 @@ def _port_from_env_file(path):
             if s.startswith(PORT_KEY + "="):
                 return s.split("=", 1)[1].split("#", 1)[0].strip().strip("'\"")
     return None
+
+
+def _iso_now():
+    """UTC ISO 8601 with milliseconds and Z (FORMATS §0), for log lines."""
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 class TavilyError(Exception):
@@ -127,24 +133,37 @@ ROUTES = {"/search": do_search, "/extract": do_extract}
 class Handler(BaseHTTPRequestHandler):
     server_version = "fake-tavily/1"
     sys_version = ""
+    # HTTP/1.1 keep-alive: several requests on one connection are each answered, routed and logged. Every
+    # response carries Content-Length; any path that does not read the request body closes the connection, so
+    # unread body bytes are never parsed as a request line (or logged as one).
+    protocol_version = "HTTP/1.1"
+    timeout = 30  # an idle keep-alive connection does not hold a thread forever
 
     def log_message(self, fmt, *args):
         # The request line holds method and path only; headers (Authorization included) are never logged.
         if self.server.verbose:
-            sys.stderr.write("fake_tavily %s\n" % (fmt % args))
+            sys.stderr.write("fake_tavily %s %s\n" % (_iso_now(), fmt % args))
 
     def _send(self, status, obj):
         data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(data)
+
+    def _close_unless_bodyless(self):
+        """Before answering without reading the body: close the connection if a body might follow."""
+        if self.headers.get("Content-Length", "0").strip() != "0" or self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
 
     def _error(self, status, message):
         self._send(status, {"detail": {"error": message}})
 
     def do_GET(self):
+        self._close_unless_bodyless()
         if urlsplit(self.path).path == "/health":
             self._send(200, {"status": "ok"})
         else:
@@ -154,12 +173,20 @@ class Handler(BaseHTTPRequestHandler):
         t0 = time.perf_counter()
         route = ROUTES.get(urlsplit(self.path).path)
         if route is None:
+            self._close_unless_bodyless()
             return self._error(404, "Not found")
+        if self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
+            return self._error(411, "Content-Length required")
         try:
             length = int(self.headers.get("Content-Length") or 0)
+            if length < 0:
+                raise ValueError
         except ValueError:
+            self.close_connection = True
             return self._error(400, "Invalid Content-Length")
         if length > MAX_BODY:
+            self.close_connection = True
             return self._error(413, "Request body too large")
         try:
             body = json.loads(self.rfile.read(length) or b"null")
@@ -180,6 +207,12 @@ class Handler(BaseHTTPRequestHandler):
 
 class FakeTavilyServer(ThreadingHTTPServer):
     daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        # With keep-alive, a client that resets or drops its connection is a normal disconnect, not an error.
+        if isinstance(sys.exc_info()[1], (ConnectionResetError, BrokenPipeError, ConnectionAbortedError)):
+            return
+        super().handle_error(request, client_address)
 
 
 def make_server(port=None, host=LOOPBACK, fixtures_dir=pages.DEFAULT_FIXTURES, state_path=None, verbose=False):

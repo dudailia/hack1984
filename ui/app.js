@@ -68,7 +68,7 @@
   function session(sid) {
     if (!S.sessions[sid]) {
       S.sessions[sid] = {
-        rows: [], secrets: [], canary: null, mode: null, source: null, careless: false,
+        rows: [], typed: [], secrets: [], canary: null, mode: null, source: null, careless: false,
         memo: '', title: '', sha: '', answer: null, done: null,
         m: { leaks: 0, blocked: 0, credits: 0, seconds: null },
       };
@@ -287,6 +287,9 @@
     renderCounters(sid, animate);
     renderBadge();
     renderGateHead();
+    // The Planner room follows the same run: its dossier and its typed facts (proof beats included).
+    if (sid && S.sessions[sid] && S.sessions[sid].memo) renderMemo(sid);
+    renderTyped(sid);
   }
 
   // ---------- dossier memo ----------
@@ -303,22 +306,39 @@
       : seg.text));
   }
 
+  // The memo as a paper dossier: typewriter header, ink stamp, marker redactions (DESIGN.md "Materials").
   function dossier(sid, redact) {
     const s = session(sid);
     const subject = s.title || '—';
-    return [
-      el('p', { class: 'dossier-head' }, '> FILE 1984 · SUBJECT: ', redact ? redacted(subject, sid) : subject,
-        s.sha ? ` · sha ${shortHash(s.sha)}` : ''),
-      el('div', { class: 'confidential', 'aria-label': 'confidential' }, 'CONFIDENTIAL'),
-      el('div', { class: 'memo' }, redact ? redacted(s.memo, sid) : s.memo),
-    ];
+    return el('article', { class: 'paper', 'aria-label': 'Confidential memo' },
+      el('p', { class: 'tw' }, 'FILE 1984', s.sha ? `  ·  SHA ${shortHash(s.sha)}` : ''),
+      el('p', { class: 'tw' }, 'SUBJECT: ', redact ? redacted(subject, sid) : subject),
+      el('div', { class: 'stamp-row' }, el('span', { class: 'confidential' }, 'CONFIDENTIAL')),
+      el('div', { class: 'memo' }, redact ? redacted(s.memo, sid) : s.memo));
   }
 
-  function renderMemo() {
-    const sid = S.current;
+  function renderMemo(sid = S.view) {
     if (!sid || !session(sid).memo) return;
     fill($('#dossier'), dossier(sid, true));
     fill($('#agent-dossier'), dossier(sid, false));   // the single agent holds the memo in the clear
+  }
+
+  // ---------- typed facts: what the Planner receives, as receipt chips ----------
+  function typedNode(d, animate) {
+    return el('li', { class: animate ? 'fade' : '' },
+      el('div', { class: 'tneed' }, `${d.need} · ${d.found ? 'found' : 'not found'}`),
+      el('div', { class: 'chips' }, (d.values || []).map((v) => el('div', { class: 'chip' },
+        el('div', { class: 'chip-top' }, el('span', { class: 'chip-num' }, String(v.value)), el('span', { class: 'chip-unit' }, v.unit)),
+        el('div', { class: 'chip-foot' }, `${v.period || '—'} · ${v.result_id}`)))));
+  }
+
+  function renderTyped(sid) {
+    const s = sid && S.sessions[sid];
+    if (!s || s.typed.length === 0) {
+      fill($('#typed'), el('li', null, waiting('no numbers yet')));
+      return;
+    }
+    fill($('#typed'), s.typed.map((d) => typedNode(d, false)));
   }
 
   // ---------- ledger ----------
@@ -335,10 +355,18 @@
       : chars(seg.text)));
   }
 
+  // FORMATS §10 (run_done): leaks count only allowed attempts whose rule is `canary` (exact) or starts with
+  // `secret.` or `provenance.`; `shape.*` and `gate.*` don't count.
+  function isLeakRule(rule) {
+    return typeof rule === 'string' && (rule === 'canary' || rule.startsWith('secret.') || rule.startsWith('provenance.'));
+  }
+
+  // blocked | leak | noted (allowed, a non-leak rule recorded) | allowed | result
   function rowKind(row) {
     if (row.row_type !== 'attempt') return 'result';
     if (row.decision === 'blocked') return 'blocked';
-    return row.rule != null ? 'leak' : 'allowed';
+    if (row.rule == null) return 'allowed';
+    return isLeakRule(row.rule) ? 'leak' : 'noted';
   }
 
   function rowNode(entry, sid, animate) {
@@ -362,7 +390,6 @@
         el('span', { class: 'seq' }, pad2(row.seq)),
         el('span', { class: 'kind' }, row.kind),
         el('span', { class: 'dest', title: row.destination }, shortDest(row.destination)),
-        el('span', { class: 'hash', title: row.hash }, shortHash(row.hash)),
         mark));
       const d = display || {};
       if (d.query) {
@@ -372,9 +399,19 @@
         li.append(q);
       } else if (d.summary || d.label) li.append(el('div', { class: 'q indent' }, d.summary || d.label));
       const detail = (entry.blockedInfo && entry.blockedInfo.detail) || d.detail;
-      if (row.rule) li.append(el('div', { class: 'rule indent' }, `rule ${row.rule}`, detail ? el('span', { class: 'detail' }, ` · ${detail}`) : null));
+      if (row.rule && kind === 'noted') {
+        // Allowed, and a non-leak rule fired (shape.*, gate.*): recorded, never red, never counted.
+        li.append(el('div', { class: 'rule noted indent' }, `rule ${row.rule} · recorded, not a leak`,
+          detail ? el('span', { class: 'detail' }, ` · ${detail}`) : null));
+      } else if (row.rule) {
+        li.append(el('div', { class: 'rule indent' }, `rule ${row.rule}`, detail ? el('span', { class: 'detail' }, ` · ${detail}`) : null));
+      }
       if (kind === 'blocked' || kind === 'leak') li.append(el('div', { class: 'indent' }, el('span', { class: 'stamp' }, kind === 'blocked' ? 'BLOCKED' : 'LEAKED')));
       if (entry.blockedInfo && entry.blockedInfo.planted) li.append(plantedTag());
+      // Receipt footer: the hash, the bytes and the time, under a tear line.
+      li.append(el('div', { class: 'slip-foot' },
+        el('span', { class: 'hash', title: row.hash }, `#${shortHash(row.hash)}`),
+        el('span', null, `${row.bytes != null ? `${row.bytes} B · ` : ''}${(row.time || '').slice(11, 19)}`)));
     } else {
       const bits = [row.status === 'sent' ? String(row.http_status ?? '') : row.status];
       if (row.credits_used != null) bits.push(`${row.credits_used} credit${row.credits_used === 1 ? '' : 's'}`);
@@ -476,13 +513,31 @@
     return splitTerms(text, terms).map((seg) => (seg.term ? el('mark', { class: 'planted' }, seg.text) : seg.text));
   }
 
+  function splitUrl(url) {
+    try {
+      const u = new URL(url);
+      return { host: u.host, path: `${u.pathname}${u.search}` };
+    } catch (_) {
+      return { host: url || '', path: '' };
+    }
+  }
+
+  // A web page as a mini browser window: tab, address bar, then the page (DESIGN.md "Materials").
   function docNode(doc, animate) {
     const hl = doc.highlights || [];
-    return el('article', { class: `doc${animate ? ' fade' : ''}` },
-      el('div', { class: 'doc-title' }, `${doc.result_id}  ${doc.title}`),
-      el('div', { class: 'doc-url' }, doc.url),
-      el('p', { class: 'doc-excerpt' }, excerptNodes(doc.excerpt || '', hl)),
-      hl.map((h) => el('p', { class: `planted-label${animate ? ' fade-late' : ''}` }, `▲ ${h.label}`)));
+    const { host, path } = splitUrl(doc.url);
+    return el('article', { class: `browser${animate ? ' fade' : ''}`, 'aria-label': `Web page ${doc.result_id}` },
+      el('div', { class: 'tabbar' },
+        el('span', { class: 'tab', title: doc.title }, `${doc.result_id} · ${doc.title}`)),
+      el('div', { class: 'addr' },
+        el('span', { class: 'nav', 'aria-hidden': 'true' }, '‹ › ↻'),
+        el('span', { class: 'field', title: doc.url }, el('b', null, host), path)),
+      el('div', { class: 'page' },
+        el('div', { class: 'doc-title' }, doc.title),
+        // Excerpts can be up to 2,000 characters (FORMATS §3): they scroll inside the window.
+        el('p', { class: 'doc-excerpt', tabindex: '0', role: 'region', 'aria-label': `Text of ${doc.result_id}` },
+          excerptNodes(doc.excerpt || '', hl)),
+        hl.map((h) => el('p', { class: `planted-label${animate ? ' fade-late' : ''}` }, `▲ ${h.label}`))));
   }
 
   function jobNode(d, animate) {
@@ -564,7 +619,8 @@
       li.querySelector('.pslot').textContent = '✕';
       if (d.tampered && Number(li.dataset.seq) === d.tampered_seq) {
         li.classList.add('tampered');
-        li.append(el('div', { class: 'indent' }, el('span', { class: 'tag tampered-tag' }, '1 byte edited')));
+        li.insertBefore(el('div', { class: 'indent' }, el('span', { class: 'tag tampered-tag' }, '1 byte edited')),
+          li.querySelector('.slip-foot'));
       }
     };
 
@@ -723,7 +779,7 @@
       const d = env.data;
       const sid = env.session_id;
       const s = session(sid);
-      Object.assign(s, { rows: [], mode: d.mode, source: d.source, careless: !!d.plant_careless, answer: null, done: null,
+      Object.assign(s, { rows: [], typed: [], mode: d.mode, source: d.source, careless: !!d.plant_careless, answer: null, done: null,
         m: { leaks: 0, blocked: 0, credits: 0, seconds: null } });
       S.current = sid;
       S.fakeDest = null;
@@ -806,7 +862,7 @@
         const r = li.querySelector('.rule');
         if (r) r.append(el('span', { class: 'detail' }, ` · ${env.data.detail}`));
       }
-      if (env.data.planted && !li.querySelector('.tag')) li.append(plantedTag());
+      if (env.data.planted && !li.querySelector('.tag')) li.insertBefore(plantedTag(), li.querySelector('.slip-foot'));
       if (o && o.instant) scrollLedger();
     },
 
@@ -819,7 +875,9 @@
       const node = jobNode(d, !(o && o.instant));
       target.append(node);
       const planted = node.querySelector('mark.planted');
-      scrollWithin(target, planted || node, planted ? 'center' : 'start');
+      // Show the poisoned page from its tab and address bar down, and bring the planted line into its text box.
+      scrollWithin(target, planted ? planted.closest('.browser') : node, 'start');
+      if (planted) scrollWithin(planted.closest('.doc-excerpt'), planted, 'nearest');
     },
 
     reader_claims(env) {
@@ -840,13 +898,12 @@
     },
 
     planner_typed(env, o) {
-      if (env.session_id !== S.current) return;
-      const d = env.data;
+      const s = session(env.session_id);
+      s.typed.push(env.data);
+      if (env.session_id !== S.view) return;
       const list = $('#typed');
       list.querySelectorAll('.waiting').forEach((n) => n.closest('li').remove());
-      const vals = (d.values || []).map((v) => el('div', { class: 'val' }, `${v.value} ${v.unit}  ${v.period || '—'}  ${v.result_id}`));
-      const li = el('li', { class: o && o.instant ? '' : 'fade' },
-        el('div', { class: 'tneed' }, `${d.need}  ${d.found ? 'found' : 'not found'}`), vals);
+      const li = typedNode(env.data, !(o && o.instant));
       list.append(li);
       scrollWithin($('#planner-low'), li);
     },
@@ -879,6 +936,11 @@
       $('#proof-head').textContent = shortHash(d.bundle_head);
       $('#proof-head').title = d.bundle_head;
       $('#proof-rows').textContent = String(d.rows_checked);
+      // Signer key fingerprint (FORMATS §8, §10): first 16 hex like the verifier prints, full value on hover.
+      const fp = typeof d.signer_key_sha256 === 'string' && /^[0-9a-f]{64}$/.test(d.signer_key_sha256) ? d.signer_key_sha256 : null;
+      $('#proof-signer-row').hidden = !fp;
+      $('#proof-signer').textContent = fp ? `${fp.slice(0, 16)}…` : '';
+      $('#proof-signer').title = fp || '';
       if (d.tampered_seq != null) $('#tamper-seq').value = d.tampered_seq;
       walkProof(d, animOK(o));
     },
@@ -943,6 +1005,7 @@
     fill($('#verdict'), el('p', { class: 'empty' }, 'Not verified yet. Press Verify proof.'));
     $('#proof-head').textContent = '—';
     $('#proof-rows').textContent = '—';
+    $('#proof-signer-row').hidden = true;
     $('#sheet').classList.remove('open');
     $('#exit').classList.remove('flash');
     setScreen('main');
