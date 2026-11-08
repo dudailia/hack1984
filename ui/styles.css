@@ -224,7 +224,6 @@ kbd {
   box-decoration-break: clone;
 }
 .redact:hover:not(:disabled), .redact:focus-visible { background: var(--accent-bg); color: var(--accent-text); }
-.redact:hover::after, .redact:focus-visible::after { content: " (" attr(data-label) ")"; color: var(--muted); }
 
 /* ---------- typed facts ---------- */
 .typed li { padding: var(--s2) 0; border-top: 1px solid var(--border); }

@@ -93,7 +93,7 @@
   function session(sid) {
     if (!S.sessions[sid]) {
       S.sessions[sid] = {
-        rows: [], typed: [], secrets: [], canary: null, mode: null, source: null, careless: false,
+        rows: [], typed: [], typedKeys: new Set(), urls: {}, secrets: [], secretsReady: false, canary: null, mode: null, source: null, careless: false,
         memo: '', title: '', sha: '', answer: null, done: null,
         m: { leaks: 0, blocked: 0, credits: 0, seconds: null },
       };
@@ -219,6 +219,7 @@
     if (m === 'single') $('#source').value = 'fake';
     setEye(m === 'single');
     renderGateHead();
+    renderMemo();   // the clear copy exists only while the single agent layout is shown
   }
 
   function renderBadge() {
@@ -369,9 +370,15 @@
     return terms;
   }
 
-  function redacted(text, sid) {
-    return splitTerms(text, memoTerms(sid), true).map((seg) => (seg.term
-      ? el('button', { type: 'button', class: 'redact', 'data-label': seg.term.label, 'aria-label': `hidden: ${seg.term.label}` }, seg.text)
+  // Secrets are replaced before anything reaches the DOM: a bar carries only its label (shown on hover),
+  // padded with figure spaces to the secret's length. canaryOnly: the single agent's clear copy, where only
+  // the canary is hidden. The canary is never rendered anywhere.
+  function redacted(text, sid, canaryOnly = false) {
+    const s = session(sid);
+    const terms = canaryOnly ? (s.canary ? [{ text: s.canary, label: 'canary' }] : []) : memoTerms(sid);
+    return splitTerms(text, terms, true).map((seg) => (seg.term
+      ? el('button', { type: 'button', class: 'redact', 'data-label': seg.term.label, 'aria-label': `hidden: ${seg.term.label}` },
+        seg.term.label.padEnd(seg.text.length, '\u2007'))
       : seg.text));
   }
 
@@ -381,19 +388,22 @@
     const subject = s.title || '—';
     return el('article', { class: 'paper', 'aria-label': 'Confidential memo' },
       el('p', { class: 'tw t-classic' }, 'FILE 1984', s.sha ? `  ·  SHA ${shortHash(s.sha)}` : ''),
-      el('p', { class: 'tw t-classic' }, 'SUBJECT: ', redact ? redacted(subject, sid) : subject),
+      el('p', { class: 'tw t-classic' }, 'SUBJECT: ', redacted(subject, sid, !redact)),
       el('div', { class: 'stamp-row t-classic' }, el('span', { class: 'confidential' }, 'CONFIDENTIAL')),
       el('div', { class: 'doc-head t-console' },
         el('p', { class: 'doc-name' }, 'Deal memo'),
         el('p', { class: 'doc-meta', title: redact ? 'Hover a bar to see what kind of secret it hides' : '' }, redact ? 'Redacted on screen' : 'Shown in full',
           s.sha ? [' · sha ', el('span', { class: 'mono', title: s.sha }, shortHash(s.sha))] : '')),
-      el('div', { class: 'memo' }, redact ? redacted(s.memo, sid) : s.memo));
+      el('div', { class: 'memo' }, redacted(s.memo, sid, !redact)));
   }
 
   function renderMemo(sid = S.view) {
-    if (!sid || !session(sid).memo) return;
+    // Nothing is rendered until parties_confirmed says what to redact (memo_loaded arrives first).
+    if (!sid || !session(sid).memo || !session(sid).secretsReady) return;
     fill($('#dossier'), dossier(sid, true));
-    fill($('#agent-dossier'), dossier(sid, false));   // the single agent holds the memo in the clear
+    // The single agent holds the memo in the clear (canary still hidden); outside that layout it is not in the DOM.
+    if (S.uiMode === 'single') fill($('#agent-dossier'), dossier(sid, false));
+    else fill($('#agent-dossier'), waiting('waiting for the memo'));
   }
 
   // ---------- typed facts: what the Planner receives, as receipt chips ----------
@@ -628,7 +638,7 @@
 
   function jobNode(d, animate) {
     const body = el('div', { class: 'job-body' }, (d.docs || []).map((doc) => docNode(doc, animate)), el('div', { class: 'claims' }));
-    const job = el('section', { class: 'job', 'data-job': d.job || '' });
+    const job = el('section', { class: 'job', 'data-job': d.job || '', 'data-docs': (d.docs || []).length });
     const head = el('button', {
       type: 'button',
       class: 'job-head',
@@ -881,7 +891,7 @@
       const d = env.data;
       const sid = env.session_id;
       const s = session(sid);
-      Object.assign(s, { rows: [], typed: [], mode: d.mode, source: d.source, careless: !!d.plant_careless, answer: null, done: null,
+      Object.assign(s, { rows: [], typed: [], typedKeys: new Set(), urls: {}, mode: d.mode, source: d.source, careless: !!d.plant_careless, answer: null, done: null,
         m: { leaks: 0, blocked: 0, credits: 0, seconds: null } });
       S.current = sid;
       S.fakeDest = null;
@@ -911,6 +921,7 @@
       for (const g of env.data.confirmed_secrets || []) {
         for (const v of g.values || []) s.secrets.push({ text: v, label: g.label });
       }
+      s.secretsReady = true;
       if (env.session_id === S.current) renderMemo();
     },
 
@@ -972,6 +983,9 @@
     },
 
     docs_read(env, o) {
+      // result_id -> url for this session (FORMATS §4: ids are per session), used to dedupe typed facts.
+      const urls = session(env.session_id).urls;
+      for (const doc of env.data.docs || []) urls[doc.result_id] = doc.url;
       if (env.session_id !== S.current) return;
       const d = env.data;
       const target = d.by === 'baseline' ? $('#agent-web') : $('#reader-body');
@@ -999,11 +1013,24 @@
           el('span', { class: 'v' }, fmtValue(c.value, c.unit)), `  ${c.period || ''}  ${c.document_id}`,
           el('div', { class: 'cq' }, `“${c.quote}”`))),
         dropped.map((c) => el('div', { class: 'claim dropped' }, `${c.document_id} ${c.claim_type} dropped: ${c.reason}`))]);
-      job.querySelector('.job-summary').textContent = ` · ${job.querySelectorAll('.doc').length} documents read, ${kept.length} claims kept`;
+      // The count comes from this job's docs_read event, not from the DOM.
+      job.querySelector('.job-summary').textContent = ` · ${job.dataset.docs} documents read, ${kept.length} claims kept`;
     },
 
     planner_typed(env, o) {
       const s = session(env.session_id);
+      // A need asked twice repeats its facts, sometimes under a new result id for the same page.
+      // Keep each (need, value, unit, period, source url) once per run; there is no fact id.
+      const fresh = (env.data.values || []).filter((v) => {
+        const k = JSON.stringify([env.data.need, v.value, v.unit, v.period, s.urls[v.result_id] || v.result_id]);
+        if (s.typedKeys.has(k)) return false;
+        s.typedKeys.add(k);
+        return true;
+      });
+      const needKey = JSON.stringify([env.data.need, env.data.found]);
+      if (fresh.length === 0 && s.typedKeys.has(needKey)) return;
+      s.typedKeys.add(needKey);
+      env = { ...env, data: { ...env.data, values: fresh } };
       s.typed.push(env.data);
       if (env.session_id !== S.view) return;
       const list = $('#typed');
