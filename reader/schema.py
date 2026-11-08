@@ -11,6 +11,11 @@ CLAIM_UNITS = {
     "market_size": ("usd", "usd_millions", "usd_billions"),
     "employees": ("count",),
     "founded_year": ("year",),
+    # real estate scenario: existing units only
+    "cap_rate": ("percent",),
+    "vacancy_rate": ("percent",),
+    "interest_rate": ("percent",),
+    "price_per_sqft": ("usd",),
 }
 
 CLAIM_KEYS = frozenset(("claim_type", "subject", "value", "unit", "period", "quote", "document_id"))

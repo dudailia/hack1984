@@ -52,6 +52,10 @@ add a line to the changelog. Every company, person, URL and number in the exampl
 | market_size | usd, usd_millions, usd_billions |
 | employees | count |
 | founded_year | year |
+| cap_rate (real estate) | percent |
+| vacancy_rate (real estate) | percent |
+| interest_rate (real estate; loan rates) | percent |
+| price_per_sqft (real estate; sale price or cost per square foot) | usd |
 
 - period: `""` | `"YYYY"` | `"YYYY-YYYY"` | `"ttm"`.
 - Search presets (the Planner names one; gate/tavily.py owns the exact body; never `auto_parameters`):
@@ -421,3 +425,8 @@ the `X-DT-Token` header).
   provenance.*), replacing "rule is non-null". Text only.
 - 2026-11-08: §10 run_done adds optional `data.reason` (string or null): why the run failed, null when it did not.
 - 2026-11-08: §3 `/v1/read` error replies add `error` (code) and `detail` (text).
+- 2026-11-08: §10 `run_started` adds `scenario` (`halyard` | `real_estate`); chosen per process by `DT_SCENARIO`
+  (app/scenario.py), default `halyard`.
+- 2026-11-08: §1 adds four real estate claim types with existing units: `cap_rate`, `vacancy_rate`,
+  `interest_rate` (percent) and `price_per_sqft` (usd). The Halyard Planner prompt and grammar still list only
+  the original eight (planner profiles).
