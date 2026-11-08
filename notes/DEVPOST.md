@@ -42,7 +42,7 @@ Doublethink splits the agent into two minds and puts one gate between them and t
 
 A poisoned page can only reach the Reader, and the Reader has nothing to steal.
 
-**The demo:** the same poisoned page is shown to a normal single agent and to Doublethink. The single agent puts "Project Halyard, Ossory Capital Partners, $412 million" into its next search. Doublethink leaks nothing and still returns a cited answer. [If the "Try to break it" panel ships: a judge can type their own hidden instruction and run it against both.] All companies, people and deals in the demo are fictional.
+**The demo:** the same poisoned page is shown to a normal single agent and to Doublethink. The single agent puts "Project Halyard, Ossory Capital Partners, $412 million" into its next search. Doublethink leaks nothing and still returns a cited answer. All companies, people and deals in the demo are fictional.
 
 ## What leaves the device
 - **What leaves.** Search queries to Tavily, each checked by the Gate before it is sent, plus extract requests for pages Tavily has already returned. Public page text to Anthropic, for the Reader to extract facts from, with the query that was already sent to Tavily and the list of fact types to extract. Nothing else: the Gate allows exact hosts and paths only.
